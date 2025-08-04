@@ -1,6 +1,6 @@
 const { SlashCommandSubcommandBuilder, EmbedBuilder } = require("discord.js");
 const axios = require("axios");
-const db = require(".../db");
+const db = require("../../db");
 
 module.exports = {
   data: new SlashCommandSubcommandBuilder()
