@@ -1,27 +1,29 @@
-const sanitizeMessage = require("../utils/sanitizeMessage");
-const reconstructMessage = require("../utils/reconstructMessage");
 const axios = require("axios");
 
-module.exports = async function translateFlow(text, langTo = "en") {
-  if (!text || text.trim().length === 0) return null;
-
-  const { sanitized, placeholders } = sanitizeMessage(text);
-
-  // If message is just <<1>> <<2>> etc. skip translation
-  const placeholderOnly = sanitized.replace(/<<\d+>>/g, "").trim();
-  if (placeholderOnly.length === 0) return null;
+module.exports = async function translateFlow(content, fromLang = "detect", targetLang = "en", discordMeta = {}) {
+  if (!content || content.trim().length === 0) return null;
 
   try {
-    const response = await axios.post("http://localhost:3600/translate", {
-      text: sanitized,
-      langTo,
-      placeholders,
-    });
+    const response = await axios.post(
+      "https://mxn.au/translate/post",
+      {
+        content,
+        fromLang,
+        targetLang,
+        platform: "discord", // This ensures platform-specific tracking
+        ...discordMeta, // userId, guildId, channelId, etc.
+      },
+      {
+        headers: {
+          "x-openai-key": process.env.OPENAI_KEY,
+          "x-discord-bot": "true", // Flag for platform-specific logic
+        },
+      }
+    );
 
-    const translated = response.data.translated;
-    return reconstructMessage(translated, placeholders);
+    return response.data.translated || response.data.outputText || null;
   } catch (err) {
-    console.error("❌ Bot translation error:", err.message);
+    console.error("❌ Translation request failed:", err.message);
     return null;
   }
 };

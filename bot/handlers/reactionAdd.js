@@ -1,9 +1,8 @@
 // reactionAdd.js
 const flagMap = require("../utils/flagMap");
 const translateFlow = require("../logic/translateFlow");
-const cache = require("../cache/translatedCache");
-const { logTranslation } = require("../cache/translateLogs");
 const db = require('../db');
+const { EmbedBuilder } = require("discord.js");
 
 module.exports = async function handleReactionAdd(reaction, user) {
   try {
@@ -76,46 +75,39 @@ module.exports = async function handleReactionAdd(reaction, user) {
       }
     }
 
-    // ---- Your Translation Logic ----
+    // ---- Updated Translation Logic ----
     const flag = reaction.emoji.name;
     const targetLang = flagMap[flag];
     if (!targetLang) return;
 
-    if (reaction.message.author?.bot) {
-      logTranslation(reaction.message.id, targetLang, "denied", "bot message");
-      return;
-    }
-
-    if (await cache.isAlreadyTranslated(reaction.message.id, targetLang)) {
-      console.log(
-        ` ^o  Already translated ${reaction.message.id} to ${targetLang}`
-      );
-      logTranslation(reaction.message.id, targetLang, "denied", "duplicate");
-      return;
-    }
+    // Don’t translate bot messages
+    if (reaction.message.author?.bot) return;
 
     const original = reaction.message.content;
-    const translated = await translateFlow(original, targetLang);
+
+    // Send to Firebase function
+    const translated = await translateFlow(original, "detect", targetLang, {
+      discordUserId: user.id,
+      userName: user.username,
+      guildId: reaction.message.guild?.id,
+      channelId: reaction.message.channel?.id,
+      guildName: reaction.message.guild?.name,
+      channelName: reaction.message.channel?.name,
+    });
 
     if (!translated) {
-      console.log(
-        ` ^=^z  Skipping translation: Nothing to translate in message ${reaction.message.id}`
-      );
-      logTranslation(
-        reaction.message.id,
-        targetLang,
-        "denied",
-        "empty content"
-      );
+      console.log(` ^=^z  Skipping translation: Nothing returned for ${reaction.message.id}`);
       return;
     }
 
-    await reaction.message.channel.send({
-      content: `**Translated to ${flag} by ${user.username}:**\n${translated}`,
-    });
+    const embed = new EmbedBuilder()
+      .setColor("#50fa7b") // Soft green
+      .setAuthor({ name: `Translated to ${targetLang.toUpperCase()} ${flag}` })
+      .setDescription(translated)
+      .setFooter({ text: `Requested by ${user.username}`, iconURL: user.displayAvatarURL({ extension: "png" }) });
 
-    await cache.markTranslated(reaction.message.id, targetLang);
-    logTranslation(reaction.message.id, targetLang, "success");
+    await reaction.message.channel.send({ embeds: [embed] });
+
   } catch (err) {
     console.error(" ^z   ^o Error in reaction handler:", err);
   }
