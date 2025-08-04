@@ -10,18 +10,22 @@ module.exports = async function handleReactionAdd(reaction, user) {
     if (reaction.message.partial) await reaction.message.fetch();
 
     if (!user.bot) {
-      // Upsert author
+      // Upsert author (Discord user)
       db.prepare(`
-        INSERT OR REPLACE INTO authors (id, name, nickname, discriminator, color, is_bot, avatar_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO authors
+          (id, name, nickname, discriminator, color, is_bot, avatar_url, created_at, joined_at, is_webhook)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         user.id,
         user.username,
         user.nickname ?? null,
         user.discriminator ?? null,
-        null,
+        null, // color
         user.bot ? 1 : 0,
-        user.displayAvatarURL?.({ extension: "png", size: 128 }) ?? null
+        user.displayAvatarURL?.({ extension: "png", size: 128 }) ?? null,
+        user.createdAt?.toISOString?.() ?? null,
+        guildMember?.joinedAt?.toISOString?.() ?? null,
+        user.isWebhook ? 1 : 0
       );
 
       // Upsert or update the reaction row
@@ -46,13 +50,14 @@ module.exports = async function handleReactionAdd(reaction, user) {
         reactionId = reactionRow.id;
       } else {
         db.prepare(`
-          INSERT INTO reactions (message_id, emoji_name, emoji_id, count)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO reactions (message_id, emoji_name, emoji_id, count, created_at)
+          VALUES (?, ?, ?, ?, ?)
         `).run(
           reaction.message.id,
           reaction.emoji.name,
           reaction.emoji.id ?? null,
-          reaction.count
+          reaction.count,
+          new Date().toISOString()
         );
         // Get the new reaction id
         reactionId = db.prepare(`
