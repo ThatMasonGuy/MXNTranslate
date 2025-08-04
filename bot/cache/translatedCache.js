@@ -1,20 +1,26 @@
 // bot/cache/translatedCache.js
-const translated = new Set();
+const redis = require("./redisClient");
+
+const EXPIRATION_SECONDS = 86400; // 24 hours cache expiration (adjust as needed)
 
 function generateKey(messageId, langCode) {
-  return `${messageId}:${langCode}`;
+  return `translated:${messageId}:${langCode}`;
 }
 
 module.exports = {
-  isAlreadyTranslated(messageId, lang) {
-    return translated.has(generateKey(messageId, lang));
+  async isAlreadyTranslated(messageId, lang) {
+    const key = generateKey(messageId, lang);
+    const exists = await redis.exists(key);
+    return exists === 1;
   },
-  markTranslated(messageId, lang) {
-    translated.add(generateKey(messageId, lang));
+
+  async markTranslated(messageId, lang) {
+    const key = generateKey(messageId, lang);
+    await redis.set(key, '1', 'EX', EXPIRATION_SECONDS);
   },
-  getTranslatedLanguages(messageId) {
-    return [...translated]
-      .filter((key) => key.startsWith(`${messageId}:`))
-      .map((key) => key.split(":")[1]);
+
+  async getTranslatedLanguages(messageId) {
+    const keys = await redis.keys(`translated:${messageId}:*`);
+    return keys.map(key => key.split(':')[2]);
   },
 };

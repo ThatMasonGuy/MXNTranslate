@@ -1,10 +1,11 @@
-// utils/reconstructMessage.js
-module.exports = function reconstructMessage(
-  translatedText,
-  placeholders = {}
-) {
+const START = '\uE000';
+const END = '\uE001';
+
+const PLACEHOLDER_REGEX = /\[PH(\d+)\]/g;
+
+module.exports = function reconstructMessage(translatedText, placeholders = {}) {
   return translatedText.replace(
-    /<<(\d+)>>/g,
-    (_, index) => placeholders[index] || `<<${index}>>`
+    PLACEHOLDER_REGEX,
+    (_, index) => placeholders[index] || `[PH${index}]`
   );
 };
