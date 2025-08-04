@@ -10,13 +10,13 @@ module.exports = async function translateFlow(content, fromLang = "detect", targ
         content,
         fromLang,
         targetLang,
-        platform: "discord", // This ensures platform-specific tracking
-        ...discordMeta, // userId, guildId, channelId, etc.
+        platform: "discord",
+        ...discordMeta,
       },
       {
         headers: {
           "x-openai-key": process.env.OPENAI_KEY,
-          "x-discord-bot": "true", // Flag for platform-specific logic
+          "x-discord-bot": "true",
         },
       }
     );
