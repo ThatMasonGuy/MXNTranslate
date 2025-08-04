@@ -1,8 +1,6 @@
-// syncBackfill.js
 const insertMessage = require('../handlers/messageCreate');
 const db = require('../db');
 
-// Helper: Get the most recent logged message (by timestamp) for a channel
 function getLastLoggedMessageId(channelId) {
   const row = db.prepare(
     "SELECT id FROM messages WHERE channel_id = ? ORDER BY timestamp DESC LIMIT 1"
@@ -10,8 +8,59 @@ function getLastLoggedMessageId(channelId) {
   return row ? row.id : null;
 }
 
-async function backfillChannel(channel, throttleMs = 750) {
-  // Find the most recent message in DB
+// Batched insert for messages, reactions, and authors
+function batchInsertMessages(messages) {
+  const insertMsg = db.prepare("SELECT 1 FROM messages WHERE id = ?");
+  const insertReaction = db.prepare(`
+    INSERT INTO reactions (message_id, emoji_name, emoji_id, count)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(message_id, emoji_name, emoji_id) DO UPDATE SET count = excluded.count
+  `);
+  const selectReactionId = db.prepare(`
+    SELECT id FROM reactions
+    WHERE message_id = ? AND emoji_name = ? AND emoji_id IS ?
+    ORDER BY id DESC LIMIT 1
+  `);
+  const insertAuthor = db.prepare(`
+    INSERT OR REPLACE INTO authors (id, name, nickname, discriminator, color, is_bot, avatar_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertReactionUser = db.prepare(`
+    INSERT OR IGNORE INTO reaction_users (reaction_id, user_id)
+    VALUES (?, ?)
+  `);
+
+  db.transaction((batch) => {
+    for (const { msg, reactionsData } of batch) {
+      if (!insertMsg.get(msg.id)) {
+        insertMessage(msg); // Your custom handler (assumed already efficient!)
+        for (const r of reactionsData) {
+          insertReaction.run(msg.id, r.emoji_name, r.emoji_id, r.count);
+          const reactionIdRow = selectReactionId.get(msg.id, r.emoji_name, r.emoji_id);
+          const reactionId = reactionIdRow?.id;
+
+          // --- Defer user fetch for now (comment out next block to speed up initial backfill) ---
+          if (reactionId && r.userList) {
+            for (const user of r.userList) {
+              insertAuthor.run(
+                user.id,
+                user.username,
+                user.username, // No nick from here
+                user.discriminator ?? null,
+                null,
+                user.bot ? 1 : 0,
+                user.displayAvatarURL?.({ extension: "png", size: 128 }) ?? null
+              );
+              insertReactionUser.run(reactionId, user.id);
+            }
+          }
+        }
+      }
+    }
+  })(messages);
+}
+
+async function backfillChannel(channel, throttleMs = 50) {
   let afterId = getLastLoggedMessageId(channel.id);
   let keepGoing = true;
   let fetchCount = 0;
@@ -21,7 +70,6 @@ async function backfillChannel(channel, throttleMs = 750) {
     let options = { limit: 100 };
     if (afterId) options.after = afterId;
 
-    // Fetch messages newer than afterId (up to 100)
     let messages;
     try {
       messages = await channel.messages.fetch(options);
@@ -31,89 +79,36 @@ async function backfillChannel(channel, throttleMs = 750) {
       break;
     }
 
-    // If no new messages, break out
     if (!messages || messages.size === 0) break;
 
-    // Discord.js sorts from newest -> oldest, so reverse
     const sorted = Array.from(messages.values()).sort(
       (a, b) => a.createdTimestamp - b.createdTimestamp
     );
 
-    // Insert any missing messages (should all be new, but safe to check)
+    // --- Prepare for batching ---
+    const batchData = [];
     for (const msg of sorted) {
-      const exists = db.prepare("SELECT 1 FROM messages WHERE id = ?").get(msg.id);
-      if (!exists) {
-        insertMessage(msg);
-        totalAdded++;
-
-        // ---- PATCH: Backfill reactions & users ----
-        if (msg.reactions.cache.size > 0) {
-          for (const reaction of msg.reactions.cache.values()) {
-            // Insert or update the reaction row
-            db.prepare(`
-              INSERT INTO reactions (message_id, emoji_name, emoji_id, count)
-              VALUES (?, ?, ?, ?)
-              ON CONFLICT(message_id, emoji_name, emoji_id) DO UPDATE SET count = excluded.count
-            `).run(
-              msg.id,
-              reaction.emoji.name,
-              reaction.emoji.id ?? null,
-              reaction.count
-            );
-
-            // Get the reaction row ID (for reaction_users)
-            const reactionIdRow = db.prepare(`
-              SELECT id FROM reactions
-              WHERE message_id = ? AND emoji_name = ? AND emoji_id IS ?
-              ORDER BY id DESC LIMIT 1
-            `).get(
-              msg.id,
-              reaction.emoji.name,
-              reaction.emoji.id ?? null
-            );
-            const reactionId = reactionIdRow?.id;
-
-            // Now fetch users for this reaction
-            if (reactionId) {
-              let users;
-              try {
-                users = await reaction.users.fetch();
-              } catch (err) {
-                console.warn(`Failed to fetch users for reaction on message ${msg.id}:`, err);
-                continue;
-              }
-              for (const user of users.values()) {
-                // Upsert author row if necessary
-                db.prepare(`
-                  INSERT OR REPLACE INTO authors (id, name, nickname, discriminator, color, is_bot, avatar_url)
-                  VALUES (?, ?, ?, ?, ?, ?, ?)
-                `).run(
-                  user.id,
-                  user.username,
-                  user.username, // no nick from here
-                  user.discriminator ?? null,
-                  null,
-                  user.bot ? 1 : 0,
-                  user.displayAvatarURL?.({ extension: "png", size: 128 }) ?? null
-                );
-
-                db.prepare(`
-                  INSERT OR IGNORE INTO reaction_users (reaction_id, user_id)
-                  VALUES (?, ?)
-                `).run(reactionId, user.id);
-              }
-            }
-          }
+      // Prepare reaction meta only (user lists can be fetched later in a separate pass)
+      const reactionsData = [];
+      if (msg.reactions.cache.size > 0) {
+        for (const reaction of msg.reactions.cache.values()) {
+          reactionsData.push({
+            emoji_name: reaction.emoji.name,
+            emoji_id: reaction.emoji.id ?? null,
+            count: reaction.count,
+            userList: await reaction.users.fetch()
+          });
         }
-        // ---- END PATCH ----
       }
-      afterId = msg.id; // advance afterId for next fetch
+      batchData.push({ msg, reactionsData });
+      totalAdded++;
+      afterId = msg.id;
     }
 
-    // Rate limit: Discord hard rate limit is 50 requests per second, but let's throttle to be safe
-    if (throttleMs > 0) await new Promise(res => setTimeout(res, throttleMs));
+    // --- Batched DB writes here ---
+    batchInsertMessages(batchData);
 
-    // If less than 100 messages, we're done
+    if (throttleMs > 0) await new Promise(res => setTimeout(res, throttleMs));
     if (sorted.length < 100) break;
   }
 
@@ -123,7 +118,6 @@ async function backfillChannel(channel, throttleMs = 750) {
 }
 
 // --------- THREAD SUPPORT ADDED HERE ---------
-
 async function backfillAllThreads(parentChannel) {
   let threadCount = 0;
   let threadMessageCount = 0;
