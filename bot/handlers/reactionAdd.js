@@ -9,18 +9,28 @@ module.exports = async function handleReactionAdd(reaction, user) {
     if (reaction.partial) await reaction.fetch();
     if (reaction.message.partial) await reaction.message.fetch();
 
+    // Get the guild member object for this user (if possible)
+    let guildMember = null;
+    if (reaction.message.guild) {
+      try {
+        guildMember = await reaction.message.guild.members.fetch(user.id);
+      } catch (e) {
+        guildMember = null;
+      }
+    }
+
     if (!user.bot) {
-      // Upsert author (Discord user)
       db.prepare(`
         INSERT OR REPLACE INTO authors
           (id, name, nickname, discriminator, color, is_bot, avatar_url, created_at, joined_at, is_webhook)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         user.id,
         user.username,
-        user.nickname ?? null,
+        guildMember?.nickname ?? null,
         user.discriminator ?? null,
-        null, // color
+        null,
         user.bot ? 1 : 0,
         user.displayAvatarURL?.({ extension: "png", size: 128 }) ?? null,
         user.createdAt?.toISOString?.() ?? null,
