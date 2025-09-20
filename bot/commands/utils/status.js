@@ -1,4 +1,4 @@
-// commands/translate/status.js (Keep as-is but make sure it exports properly)
+// commands/utils/status.js - Simple fix using db directly
 const { SlashCommandSubcommandBuilder, EmbedBuilder } = require("discord.js");
 const axios = require("axios");
 const db = require("../../db");
@@ -10,9 +10,10 @@ module.exports = {
 
   async execute(interaction) {
     try {
-      await interaction.deferReply({ flags: 64 });
+      // Acknowledge interaction immediately to prevent timeout
+      await interaction.deferReply({ flags: 64 }); // flags: 64 = ephemeral
 
-      // Translation API status
+      // Firebase/Translation API status
       let firebaseStatus = "❌ Translator API: Unreachable";
       try {
         const res = await axios.options("https://mxn.au/translate/post", { timeout: 3000 });
@@ -21,7 +22,7 @@ module.exports = {
         firebaseStatus = `❌ Translator API: ${err.code || "Error"}`;
       }
 
-      // Database stats
+      // DB summary (direct database access)
       let dbInfoLines = [];
       try {
         const stats = db.prepare(`
@@ -58,7 +59,9 @@ module.exports = {
         .setTimestamp()
         .setFooter({ text: "MXNTranslate Bot Health", iconURL: interaction.client.user.displayAvatarURL() });
 
-      await interaction.editReply({ embeds: [embed] });
+      await interaction.editReply({
+        embeds: [embed],
+      });
     } catch (error) {
       console.error("Status command error:", error);
       try {

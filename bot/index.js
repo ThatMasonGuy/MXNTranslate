@@ -1,14 +1,23 @@
-// bot/index.js
+// index.js (Updated to include reaction protection)
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const config = require('./config/features');
+const db = require('./db');
+
+// Services
+const StorageService = require('./services/storage');
+const TranslationService = require('./services/translation');
+
+// Handlers
+const MessageHandler = require('./handlers/messageHandler');
+const ReactionHandler = require('./handlers/reactionHandler');
+const ReactionRoleHandler = require('./handlers/reactionRoleHandler');
+const ReactionProtectionHandler = require('./handlers/reactionProtectionHandler');
+const InteractionHandler = require('./handlers/interactionHandler');
+
+// Commands and utilities
 const commands = require("./commands");
-const insertMessage = require('./handlers/messageCreate');
-const logEdit = require('./handlers/messageUpdate');
-const markDeleted = require('./handlers/messageDelete');
-const handleReactionAdd = require('./handlers/reactionAdd');
 const syncBackfill = require('./utils/syncBackfill');
-// Only for DB/audit logging, not translation removal!
-const handleReactionRemove = require('./handlers/reactionRemove');
 
 console.log("Loaded token:", process.env.DISCORD_TOKEN);
 
@@ -18,66 +27,105 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildMembers,
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
+// Initialize services
+const storageService = new StorageService(db, config);
+const translationService = new TranslationService(config);
+
+// Initialize handlers
+const messageHandler = new MessageHandler(storageService, config);
+const reactionHandler = new ReactionHandler(storageService, translationService, config);
+const reactionRoleHandler = new ReactionRoleHandler(storageService, client);
+const reactionProtectionHandler = new ReactionProtectionHandler(storageService, client);
+const interactionHandler = new InteractionHandler(storageService);
+
+// Initialize reaction role configs map
+client.reactionRoleConfigs = new Map();
+
 client.once("ready", async () => {
-  console.log(` ^|^e Logged in as ${client.user.tag}`);
+  console.log(`Logged in as ${client.user.tag}`);
+  console.log(`Features enabled: Storage=${config.storage.enabled}, Translation=${config.translation.enabled}`);
 
-  await syncBackfill(client);
+  // Load reaction role protection data
+  await reactionProtectionHandler.loadProtectionData();
 
-  console.log("Startup backfil complete. Bot is fully ready.")
-});
-
-client.on("messageCreate", async (msg) => {
-  if (msg.author.bot) return;
-  try {
-    insertMessage(msg);
-  } catch (err) {
-    console.error("Failed to log message:", err);
+  if (config.storage.enabled && config.storage.backfillOnStartup) {
+    console.log("Starting backfill...");
+    await syncBackfill(client);
+    console.log("Startup backfill complete. Bot is fully ready.");
+  } else {
+    console.log("Bot is ready (backfill skipped).");
   }
 });
 
-// Edits: log old/new content, keep history
-client.on("messageUpdate", (oldMsg, newMsg) => {
-  // oldMsg may be partial; you might want to add .fetch() logic if needed
-  logEdit(oldMsg, newMsg);
+// Message events
+client.on("messageCreate", async (msg) => {
+  await messageHandler.handleCreate(msg);
 });
 
-// Deletes: mark as deleted in DB, don't erase
-client.on("messageDelete", (msg) => {
-  markDeleted(msg);
+client.on("messageUpdate", async (oldMsg, newMsg) => {
+  await messageHandler.handleUpdate(oldMsg, newMsg);
 });
 
-// Reaction add: do translation AND DB logging
+client.on("messageDelete", async (msg) => {
+  await messageHandler.handleDelete(msg);
+});
+
+// Reaction events (handles translation, reaction roles, AND protection)
 client.on("messageReactionAdd", async (reaction, user) => {
-  if (user.bot) return;
-  await handleReactionAdd(reaction, user);
+  // Handle translation reactions
+  await reactionHandler.handleAdd(reaction, user);
+  
+  // Handle reaction role reactions
+  await reactionRoleHandler.handleReactionAdd(reaction, user);
+  
+  // Handle unauthorized reaction removal
+  await reactionProtectionHandler.handleUnauthorizedReaction(reaction, user);
 });
 
-// Reaction remove: only for audit/logging, not translation
 client.on("messageReactionRemove", async (reaction, user) => {
-  if (user.bot) return;
-  if (handleReactionRemove) await handleReactionRemove(reaction, user);
+  // Handle translation reaction removal
+  await reactionHandler.handleRemove(reaction, user);
+  
+  // Handle reaction role removal
+  await reactionRoleHandler.handleReactionRemove(reaction, user);
 });
 
+// Interaction handling (slash commands, buttons, modals, select menus)
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
-  const category = interaction.commandName;
-  const sub = interaction.options.getSubcommand(false);
-  const key = sub ? `${category}.${sub}` : `${category}`;
-
-  const command = commands.get(key);
-  if (!command) return;
-
   try {
-    await command.execute(interaction);
+    // Handle button/modal/select menu interactions first
+    const handledByInteractionHandler = await interactionHandler.handleInteraction(interaction);
+    if (handledByInteractionHandler) return;
+
+    // Handle slash commands
+    if (interaction.isChatInputCommand()) {
+      const category = interaction.commandName;
+      const sub = interaction.options.getSubcommand(false);
+      const key = sub ? `${category}.${sub}` : `${category}`;
+
+      const command = commands.get(key);
+      if (!command) return;
+
+      await command.execute(interaction);
+    }
   } catch (err) {
-    console.error(" ^}^l Command failed:", err);
-    await interaction.reply({ content: "Something broke!", flags: 64 });
+    console.error("Command failed:", err);
+    
+    try {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: "Something broke!", flags: 64 });
+      }
+    } catch (replyError) {
+      console.error("Failed to send error response:", replyError);
+    }
   }
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
+module.exports = { storageService, translationService };

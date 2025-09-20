@@ -17,10 +17,12 @@ module.exports = {
   "🇫🇷": "fr",
   "🇧🇪": "fr",
   "🇨🇭": "fr",
+  "🇨🇦": "fr", // Quebec
 
   // German
   "🇩🇪": "de",
   "🇦🇹": "de",
+  "🇨🇭": "de",
 
   // Italian
   "🇮🇹": "it",
@@ -35,7 +37,7 @@ module.exports = {
   // Korean
   "🇰🇷": "ko",
 
-  // Chinese (Simplified)
+  // Chinese (Simplified/Traditional)
   "🇨🇳": "zh",
   "🇭🇰": "zh",
   "🇹🇼": "zh",
@@ -46,6 +48,7 @@ module.exports = {
   // Arabic
   "🇸🇦": "ar",
   "🇪🇬": "ar",
+  "🇦🇪": "ar",
 
   // Hindi
   "🇮🇳": "hi",
@@ -55,6 +58,7 @@ module.exports = {
 
   // Dutch
   "🇳🇱": "nl",
+  "🇧🇪": "nl",
 
   // Swedish
   "🇸🇪": "sv",
@@ -82,4 +86,43 @@ module.exports = {
 
   // Vietnamese
   "🇻🇳": "vi",
+
+  // Tagalog / Filipino
+  "🇵🇭": "tl",
+
+  // Greek
+  "🇬🇷": "el",
+
+  // Hebrew
+  "🇮🇱": "he",
+
+  // Malay / Indonesian
+  "🇲🇾": "ms",
+  "🇮🇩": "id",
+
+  // Bengali
+  "🇧🇩": "bn",
+  "🇮🇳": "bn",
+
+  // Urdu
+  "🇵🇰": "ur",
+  "🇮🇳": "ur",
+
+  // Ukrainian
+  "🇺🇦": "uk",
+
+  // Romanian
+  "🇷🇴": "ro",
+
+  // Bulgarian
+  "🇧🇬": "bg",
+
+  // Slovak
+  "🇸🇰": "sk",
+
+  // Serbian / Croatian / Bosnian (BCS)
+  "🇷🇸": "sr",
+  "🇭🇷": "hr",
+  "🇧🇦": "bs",
 };
+
