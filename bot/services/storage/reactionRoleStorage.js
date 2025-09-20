@@ -1,4 +1,4 @@
-// services/storage/reactionRoleStorage.js
+// services/storage/reactionRoleStorage.js (Updated with edit methods)
 class ReactionRoleStorage {
   constructor(db) {
     this.db = db;
@@ -10,7 +10,7 @@ class ReactionRoleStorage {
       INSERT INTO reaction_role_configs (guild_id, channel_id, message_content, is_single_role, created_by)
       VALUES (?, ?, ?, ?, ?)
     `).run(guildId, channelId, messageContent, isSingleRole ? 1 : 0, createdBy);
-    
+
     return result.lastInsertRowid;
   }
 
@@ -90,6 +90,64 @@ class ReactionRoleStorage {
       WHERE guild_id = ? AND is_active = 1 
       ORDER BY created_at DESC
     `).all(guildId);
+  }
+
+  // ===== NEW METHODS FOR EDITING =====
+
+  // Get configs created by specific user
+  getUserConfigs(guildId, userId) {
+    return this.db.prepare(`
+      SELECT * FROM reaction_role_configs 
+      WHERE guild_id = ? AND created_by = ? AND is_active = 1 
+      ORDER BY created_at DESC
+    `).all(guildId, userId);
+  }
+
+  // Get full config with mappings by ID
+  getConfigById(configId) {
+    const config = this.db.prepare(`
+      SELECT * FROM reaction_role_configs WHERE id = ? AND is_active = 1
+    `).get(configId);
+
+    if (config) {
+      config.mappings = this.getRoleMappings(configId);
+    }
+
+    return config;
+  }
+
+  // Update config content
+  updateConfigContent(configId, messageContent, isSingleRole) {
+    this.db.prepare(`
+      UPDATE reaction_role_configs 
+      SET message_content = ?, is_single_role = ?, updated_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `).run(messageContent, isSingleRole ? 1 : 0, configId);
+  }
+
+  // Delete all role mappings for config (when editing)
+  clearRoleMappings(configId) {
+    this.db.prepare(`
+      DELETE FROM reaction_role_mappings WHERE config_id = ?
+    `).run(configId);
+  }
+
+  // Update config mode only
+  updateConfigMode(configId, isSingleRole) {
+    this.db.prepare(`
+      UPDATE reaction_role_configs 
+      SET is_single_role = ?, updated_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `).run(isSingleRole ? 1 : 0, configId);
+  }
+
+  // Check if user owns config
+  isConfigOwner(configId, userId) {
+    const result = this.db.prepare(`
+      SELECT created_by FROM reaction_role_configs WHERE id = ? AND is_active = 1
+    `).get(configId);
+
+    return result && result.created_by === userId;
   }
 
   // Deactivate config

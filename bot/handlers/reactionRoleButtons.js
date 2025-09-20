@@ -1,4 +1,4 @@
-// handlers/reactionRoleButtons.js (Enhanced modal version)
+// handlers/reactionRoleButtons.js (Enhanced with editing support)
 const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, EmbedBuilder, StringSelectMenuBuilder, ChannelType, ButtonBuilder, ButtonStyle } = require("discord.js");
 
 class ReactionRoleButtons {
@@ -33,11 +33,17 @@ class ReactionRoleButtons {
       case 'rr_add_reaction':
         await this.handleAddReaction(interaction, config, configId);
         break;
+      case 'rr_remove_reaction':
+        await this.handleRemoveReaction(interaction, config, configId);
+        break;
       case 'rr_preview':
         await this.handlePreview(interaction, config);
         break;
       case 'rr_create':
         await this.handleCreate(interaction, config, configId);
+        break;
+      case 'rr_update':
+        await this.handleUpdate(interaction, config, configId);
         break;
     }
 
@@ -53,7 +59,109 @@ class ReactionRoleButtons {
     return null;
   }
 
+  // NEW: Load existing config for editing
+  async loadEditingInterface(interaction, dbConfig) {
+    try {
+      // Create temporary config for editing
+      if (!interaction.client.reactionRoleConfigs) {
+        interaction.client.reactionRoleConfigs = new Map();
+      }
+
+      const configId = `edit_${interaction.user.id}_${Date.now()}`;
+
+      // Convert database mappings to the format expected by the interface
+      const reactions = dbConfig.mappings.map(mapping => ({
+        emoji: mapping.emoji_id ? `<:${mapping.emoji_name}:${mapping.emoji_id}>` : mapping.emoji_name,
+        emojiName: mapping.emoji_name,
+        emojiId: mapping.emoji_id,
+        roleName: interaction.guild.roles.cache.get(mapping.role_id)?.name || 'Unknown Role',
+        roleId: mapping.role_id,
+        nicknamePrefix: mapping.nickname_prefix
+      }));
+
+      interaction.client.reactionRoleConfigs.set(configId, {
+        guildId: dbConfig.guild_id,
+        channelId: dbConfig.channel_id,
+        messageContent: dbConfig.message_content,
+        isSingleRole: dbConfig.is_single_role === 1,
+        reactions: reactions,
+        createdBy: interaction.user.id,
+        embedMessageId: null,
+        isEditing: true,
+        originalConfigId: dbConfig.id,
+        originalMessageId: dbConfig.message_id
+      });
+
+      const embed = this.createConfigEmbed(interaction.client.reactionRoleConfigs.get(configId), interaction.guild, true);
+
+      const row1 = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId("rr_set_message")
+            .setLabel("Edit Message")
+            .setEmoji("📝")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("rr_toggle_mode")
+            .setLabel("Toggle Mode")
+            .setEmoji("⚙️")
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId("rr_add_reaction")
+            .setLabel("Add Reaction")
+            .setEmoji("➕")
+            .setStyle(ButtonStyle.Success)
+        );
+
+      const row2 = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId("rr_remove_reaction")
+            .setLabel("Remove Reaction")
+            .setEmoji("➖")
+            .setStyle(ButtonStyle.Danger),
+          new ButtonBuilder()
+            .setCustomId("rr_preview")
+            .setLabel("Preview")
+            .setEmoji("👁️")
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId("rr_update")
+            .setLabel("Save Changes")
+            .setEmoji("💾")
+            .setStyle(ButtonStyle.Success)
+        );
+
+      const response = await interaction.reply({
+        embeds: [embed],
+        components: [row1, row2],
+        flags: 64
+      });
+
+      // Store the response for updates
+      const config = interaction.client.reactionRoleConfigs.get(configId);
+      config.embedMessageId = response.id;
+      config.interactionToken = interaction.token;
+
+    } catch (error) {
+      console.error("Error loading editing interface:", error);
+      await interaction.reply({
+        content: "❌ Failed to load editing interface.",
+        flags: 64
+      });
+    }
+  }
+
   async handleSetChannel(interaction, config, configId) {
+    // For editing mode, don't allow channel changes
+    if (config.isEditing) {
+      await interaction.reply({
+        content: "❌ You cannot change the channel when editing. The message will stay in its current location.",
+        flags: 64
+      });
+      return;
+    }
+
     const channels = interaction.guild.channels.cache
       .filter(c => c.type === ChannelType.GuildText && c.permissionsFor(interaction.guild.members.me).has('SendMessages'))
       .first(25);
@@ -89,7 +197,7 @@ class ReactionRoleButtons {
   async handleSetMessage(interaction, config, configId) {
     const modal = new ModalBuilder()
       .setCustomId('rr_message_modal')
-      .setTitle('Set Reaction Role Message');
+      .setTitle(config.isEditing ? 'Edit Message Content' : 'Set Reaction Role Message');
 
     const messageInput = new TextInputBuilder()
       .setCustomId('message_content')
@@ -98,6 +206,11 @@ class ReactionRoleButtons {
       .setPlaceholder('Enter the message that will be posted with the reactions...')
       .setRequired(true)
       .setMaxLength(2000);
+
+    // Pre-fill with existing content if editing
+    if (config.isEditing && config.messageContent) {
+      messageInput.setValue(config.messageContent);
+    }
 
     const firstActionRow = new ActionRowBuilder().addComponents(messageInput);
     modal.addComponents(firstActionRow);
@@ -108,7 +221,7 @@ class ReactionRoleButtons {
   async handleToggleMode(interaction, config, configId) {
     config.isSingleRole = !config.isSingleRole;
     await this.updateConfigEmbed(interaction, config);
-    
+
     await interaction.reply({
       content: `✅ Mode changed to: **${config.isSingleRole ? 'Single role' : 'Multiple roles'}**`,
       flags: 64
@@ -153,6 +266,36 @@ class ReactionRoleButtons {
     await interaction.showModal(modal);
   }
 
+  // NEW: Handle removing reactions
+  async handleRemoveReaction(interaction, config, configId) {
+    if (config.reactions.length === 0) {
+      await interaction.reply({
+        content: "❌ No reactions to remove.",
+        flags: 64
+      });
+      return;
+    }
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('rr_remove_reaction_select')
+      .setPlaceholder('Choose a reaction to remove')
+      .addOptions(
+        config.reactions.map((reaction, index) => ({
+          label: `${reaction.emoji} → ${reaction.roleName}`,
+          value: index.toString(),
+          description: reaction.nicknamePrefix ? `Prefix: [${reaction.nicknamePrefix}]` : 'No prefix'
+        }))
+      );
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
+
+    await interaction.reply({
+      content: "Select the reaction to remove:",
+      components: [row],
+      flags: 64
+    });
+  }
+
   async handlePreview(interaction, config) {
     if (!config.channelId || !config.messageContent || config.reactions.length === 0) {
       await interaction.reply({
@@ -163,7 +306,7 @@ class ReactionRoleButtons {
     }
 
     const channel = interaction.guild.channels.cache.get(config.channelId);
-    const reactionsText = config.reactions.map(r => 
+    const reactionsText = config.reactions.map(r =>
       `${r.emoji} → @${r.roleName}${r.nicknamePrefix ? ` (prefix: [${r.nicknamePrefix}])` : ''}`
     ).join('\n');
 
@@ -196,7 +339,7 @@ class ReactionRoleButtons {
     // Check bot permissions
     const channel = interaction.guild.channels.cache.get(config.channelId);
     const botPermissions = channel.permissionsFor(interaction.guild.members.me);
-    
+
     if (!botPermissions.has(['SendMessages', 'AddReactions', 'ManageMessages'])) {
       await interaction.reply({
         content: "❌ I need 'Send Messages', 'Add Reactions', and 'Manage Messages' permissions in the target channel.",
@@ -264,7 +407,7 @@ class ReactionRoleButtons {
       // Clean up temp config
       interaction.client.reactionRoleConfigs.delete(configId);
 
-      const permissionWarning = interaction.guild.members.me.permissions.has('ManageNicknames') ? 
+      const permissionWarning = interaction.guild.members.me.permissions.has('ManageNicknames') ?
         '' : '\n⚠️ **Note**: I don\'t have "Manage Nicknames" permission, so nickname prefixes won\'t work.';
 
       await interaction.editReply({
@@ -279,48 +422,123 @@ class ReactionRoleButtons {
     }
   }
 
-  setupReactionMonitoring(client, messageId, allowedReactions) {
-    // Store allowed reactions for this message
+  async handleUpdate(interaction, config, configId) {
+    // Validation
+    if (!config.channelId || !config.messageContent || config.reactions.length === 0) {
+      await interaction.reply({
+        content: "❌ Please configure all required fields before saving.",
+        flags: 64
+      });
+      return;
+    }
+
+    try {
+      await interaction.deferReply({ flags: 64 });
+
+      // Update database
+      this.storageService.reactionRoles.updateConfigContent(
+        config.originalConfigId,
+        config.messageContent,
+        config.isSingleRole
+      );
+
+      // Clear and re-add role mappings
+      this.storageService.reactionRoles.clearRoleMappings(config.originalConfigId);
+
+      for (const reaction of config.reactions) {
+        this.storageService.reactionRoles.addRoleMapping(
+          config.originalConfigId,
+          reaction.emojiName,
+          reaction.emojiId,
+          reaction.roleId,
+          reaction.nicknamePrefix || null
+        );
+      }
+
+      // Update the Discord message
+      const channel = interaction.guild.channels.cache.get(config.channelId);
+      const message = await channel.messages.fetch(config.originalMessageId).catch(() => null);
+
+      if (message) {
+        // Update message content
+        await message.edit({ content: config.messageContent });
+
+        // Clear all reactions
+        await message.reactions.removeAll().catch(console.error);
+
+        // Add new reactions
+        for (const reaction of config.reactions) {
+          try {
+            await message.react(reaction.emoji);
+          } catch (error) {
+            console.error(`Failed to add reaction ${reaction.emoji}:`, error);
+          }
+        }
+
+        // Update reaction protection
+        this.updateReactionMonitoring(interaction.client, message.id, config.reactions);
+
+        // Clean up temp config
+        interaction.client.reactionRoleConfigs.delete(configId);
+
+        await interaction.editReply({
+          content: `✅ Reaction role message updated successfully!\n🔗 [Jump to message](${message.url})\n🛡️ **Protection updated**: Unauthorized reactions will be automatically removed.`
+        });
+      } else {
+        await interaction.editReply({
+          content: "❌ Could not find the original message to update. It may have been deleted."
+        });
+      }
+
+    } catch (error) {
+      console.error("Error updating reaction role message:", error);
+      await interaction.editReply({
+        content: "❌ Failed to update reaction role message."
+      });
+    }
+  }
+
+  updateReactionMonitoring(client, messageId, allowedReactions) {
     if (!client.reactionRoleProtection) {
       client.reactionRoleProtection = new Map();
     }
-    
+
     const allowedEmojis = allowedReactions.map(r => ({
       name: r.emojiName,
       id: r.emojiId,
       full: r.emoji
     }));
-    
+
     client.reactionRoleProtection.set(messageId, allowedEmojis);
   }
 
-  async updateConfigEmbed(interaction, config) {
+  createConfigEmbed(config, guild, isEditing = false) {
     const channel = config.channelId ? `<#${config.channelId}>` : "*Not selected*";
-    const message = config.messageContent ? 
-      (config.messageContent.length > 100 ? config.messageContent.substring(0, 100) + "..." : config.messageContent) 
+    const message = config.messageContent ?
+      (config.messageContent.length > 100 ? config.messageContent.substring(0, 100) + "..." : config.messageContent)
       : "*Not set*";
     const mode = config.isSingleRole ? "Single role" : "Multiple roles";
-    const reactions = config.reactions.length > 0 ? 
-      config.reactions.map(r => `${r.emoji} → ${r.roleName}`).join('\n') : 
+    const reactions = config.reactions.length > 0 ?
+      config.reactions.map(r => `${r.emoji} → ${r.roleName}`).join('\n') :
       "*None configured*";
 
-    const embed = new EmbedBuilder()
+    return new EmbedBuilder()
       .setColor("#5865f2")
-      .setTitle("🎭 Reaction Roles Setup")
-      .setDescription("Configure a reaction role message for your server.")
+      .setTitle(isEditing ? "✏️ Edit Reaction Roles" : "🎭 Reaction Roles Setup")
+      .setDescription(isEditing ? "Edit your reaction role message configuration." : "Configure a reaction role message for your server.")
       .addFields(
         { name: "📍 Channel", value: channel, inline: true },
         { name: "📝 Message", value: message, inline: true },
         { name: "⚙️ Mode", value: mode, inline: true },
         { name: "🎯 Reactions", value: reactions, inline: false }
       )
-      .setFooter({ text: "Use the buttons below to configure your reaction roles" });
+      .setFooter({ text: isEditing ? "Use the buttons below to edit your reaction roles" : "Use the buttons below to configure your reaction roles" });
+  }
+
+  async updateConfigEmbed(interaction, config) {
+    const embed = this.createConfigEmbed(config, interaction.guild, config.isEditing);
 
     try {
-      const originalResponse = await interaction.client.rest.get(
-        `/webhooks/${interaction.client.user.id}/${config.interactionToken}/messages/@original`
-      );
-      
       await interaction.client.rest.patch(
         `/webhooks/${interaction.client.user.id}/${config.interactionToken}/messages/@original`,
         { body: { embeds: [embed.toJSON()] } }
@@ -340,12 +558,32 @@ class ReactionRoleButtons {
       config.channelId = interaction.values[0];
 
       await this.updateConfigEmbed(interaction, config);
-      
+
       const channel = interaction.guild.channels.cache.get(config.channelId);
       await interaction.reply({
         content: `✅ Channel set to ${channel}`,
         flags: 64
       });
+
+      return true;
+    }
+
+    if (interaction.customId === 'rr_remove_reaction_select') {
+      const configId = this.findConfigByUser(interaction.client, interaction.user.id);
+      if (!configId) return true;
+
+      const config = interaction.client.reactionRoleConfigs.get(configId);
+      const reactionIndex = parseInt(interaction.values[0]);
+
+      if (reactionIndex >= 0 && reactionIndex < config.reactions.length) {
+        const removedReaction = config.reactions.splice(reactionIndex, 1)[0];
+        await this.updateConfigEmbed(interaction, config);
+
+        await interaction.reply({
+          content: `✅ Removed reaction: ${removedReaction.emoji} → @${removedReaction.roleName}`,
+          flags: 64
+        });
+      }
 
       return true;
     }
@@ -368,53 +606,27 @@ class ReactionRoleButtons {
     if (interaction.customId === 'rr_message_modal') {
       config.messageContent = interaction.fields.getTextInputValue('message_content');
       await this.updateConfigEmbed(interaction, config);
-      
+
       await interaction.reply({
         content: "✅ Message content updated!",
         flags: 64
       });
     } else if (interaction.customId === 'rr_add_reaction_modal') {
       const emojiInput = interaction.fields.getTextInputValue('emoji');
-      const roleName = interaction.fields.getTextInputValue('role_name');
       const nicknamePrefix = interaction.fields.getTextInputValue('nickname_prefix');
 
-      // Find role by name (case insensitive, partial matching)
-      const roles = interaction.guild.roles.cache;
-      let role = roles.find(r => r.name.toLowerCase() === roleName.toLowerCase());
-      
-      if (!role) {
-        // Try partial matching
-        const partialMatches = roles.filter(r => 
-          r.name.toLowerCase().includes(roleName.toLowerCase()) &&
-          !r.managed && 
-          r.id !== interaction.guild.id
-        );
-        
-        if (partialMatches.size === 1) {
-          role = partialMatches.first();
-        } else if (partialMatches.size > 1) {
-          const matches = partialMatches.map(r => r.name).join(', ');
-          await interaction.reply({
-            content: `❌ Multiple roles found matching "${roleName}": ${matches}\nPlease be more specific.`,
-            flags: 64
-          });
-          return true;
-        }
-      }
-
-      if (!role) {
+      if (!config.tempSelectedRole) {
         await interaction.reply({
-          content: `❌ Role "${roleName}" not found. Please check the role name and try again.`,
+          content: "❌ Role selection expired. Please try again.",
           flags: 64
         });
         return true;
       }
 
-      // Check if bot can manage this role
-      const botHighestRole = interaction.guild.members.me.roles.highest;
-      if (role.position >= botHighestRole.position && !interaction.guild.members.me.permissions.has('Administrator')) {
+      const role = interaction.guild.roles.cache.get(config.tempSelectedRole.id);
+      if (!role) {
         await interaction.reply({
-          content: `❌ I cannot manage the role "${role.name}" because it's above my highest role.`,
+          content: "❌ Selected role no longer exists.",
           flags: 64
         });
         return true;
@@ -474,8 +686,11 @@ class ReactionRoleButtons {
         nicknamePrefix: nicknamePrefix || null
       });
 
+      // Clear temp selected role
+      delete config.tempSelectedRole;
+
       await this.updateConfigEmbed(interaction, config);
-      
+
       await interaction.reply({
         content: `✅ Added reaction: ${displayEmoji} → @${role.name}${nicknamePrefix ? ` (prefix: [${nicknamePrefix}])` : ''}`,
         flags: 64
