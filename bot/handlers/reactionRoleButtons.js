@@ -677,7 +677,7 @@ class ReactionRoleButtons {
     const configId = this.findConfigByUser(interaction.client, interaction.user.id);
     if (!configId) {
       await interaction.reply({
-        content: "❌ Configuration session expired.",
+        content: "⚠️ Configuration session expired.",
         flags: 64
       });
       return true;
@@ -695,20 +695,27 @@ class ReactionRoleButtons {
       });
     } else if (interaction.customId === 'rr_add_reaction_modal') {
       const emojiInput = interaction.fields.getTextInputValue('emoji');
+      const roleNameInput = interaction.fields.getTextInputValue('role_name'); // Get role name from modal
       const nicknamePrefix = interaction.fields.getTextInputValue('nickname_prefix');
 
-      if (!config.tempSelectedRole) {
+      // Find role by name instead of using tempSelectedRole
+      const role = interaction.guild.roles.cache.find(r =>
+        r.name.toLowerCase() === roleNameInput.toLowerCase()
+      );
+
+      if (!role) {
         await interaction.reply({
-          content: "❌ Role selection expired. Please try again.",
+          content: `⚠️ Role "${roleNameInput}" not found. Please check the spelling and try again.`,
           flags: 64
         });
         return true;
       }
 
-      const role = interaction.guild.roles.cache.get(config.tempSelectedRole.id);
-      if (!role) {
+      // Check if bot can manage this role
+      const botMember = interaction.guild.members.me;
+      if (role.position >= botMember.roles.highest.position) {
         await interaction.reply({
-          content: "❌ Selected role no longer exists.",
+          content: `⚠️ I cannot manage the role "${role.name}" because it's above my highest role.`,
           flags: 64
         });
         return true;
@@ -736,7 +743,7 @@ class ReactionRoleButtons {
           displayEmoji = `<${customEmoji.animated ? 'a' : ''}:${customEmoji.name}:${customEmoji.id}>`;
         } else {
           await interaction.reply({
-            content: `❌ Custom emoji "${emojiInput}" not found in this server.`,
+            content: `⚠️ Custom emoji "${emojiInput}" not found in this server.`,
             flags: 64
           });
           return true;
@@ -752,7 +759,17 @@ class ReactionRoleButtons {
       const existingReaction = config.reactions.find(r => r.emoji === displayEmoji);
       if (existingReaction) {
         await interaction.reply({
-          content: `❌ Emoji ${displayEmoji} is already configured for role @${existingReaction.roleName}.`,
+          content: `⚠️ Emoji ${displayEmoji} is already configured for role @${existingReaction.roleName}.`,
+          flags: 64
+        });
+        return true;
+      }
+
+      // Check for duplicate roles
+      const existingRoleReaction = config.reactions.find(r => r.roleId === role.id);
+      if (existingRoleReaction) {
+        await interaction.reply({
+          content: `⚠️ Role @${role.name} is already configured with emoji ${existingRoleReaction.emoji}.`,
           flags: 64
         });
         return true;
@@ -767,9 +784,6 @@ class ReactionRoleButtons {
         roleId: role.id,
         nicknamePrefix: nicknamePrefix || null
       });
-
-      // Clear temp selected role
-      delete config.tempSelectedRole;
 
       await this.updateConfigEmbed(interaction, config);
 
