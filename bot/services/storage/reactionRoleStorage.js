@@ -150,6 +150,14 @@ class ReactionRoleStorage {
     return result && result.created_by === userId;
   }
 
+  // Get mapping by role ID
+  getMappingByRole(configId, roleId) {
+    return this.db.prepare(`
+      SELECT * FROM reaction_role_mappings 
+      WHERE config_id = ? AND role_id = ?
+    `).get(configId, roleId);
+  }
+
   // Deactivate config
   deactivateConfig(configId) {
     this.db.prepare(`
