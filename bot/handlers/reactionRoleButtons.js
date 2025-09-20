@@ -435,6 +435,17 @@ class ReactionRoleButtons {
     try {
       await interaction.deferReply({ flags: 64 });
 
+      // Get the original config to compare reactions
+      const originalConfig = this.storageService.reactionRoles.getConfigById(config.originalConfigId);
+      const originalReactions = originalConfig.mappings.map(m => ({
+        emoji: m.emoji_id ? `<:${m.emoji_name}:${m.emoji_id}>` : m.emoji_name,
+        emojiName: m.emoji_name,
+        emojiId: m.emoji_id
+      }));
+
+      // Check if reactions actually changed
+      const reactionsChanged = this.hasReactionsChanged(originalReactions, config.reactions);
+
       // Update database
       this.storageService.reactionRoles.updateConfigContent(
         config.originalConfigId,
@@ -463,16 +474,57 @@ class ReactionRoleButtons {
         // Update message content
         await message.edit({ content: config.messageContent });
 
-        // Clear all reactions
-        await message.reactions.removeAll().catch(console.error);
+        // Only update reactions if they actually changed
+        if (reactionsChanged) {
+          console.log("Reactions changed - updating Discord message reactions...");
 
-        // Add new reactions
-        for (const reaction of config.reactions) {
-          try {
-            await message.react(reaction.emoji);
-          } catch (error) {
-            console.error(`Failed to add reaction ${reaction.emoji}:`, error);
+          // Get current bot reactions
+          const currentBotReactions = message.reactions.cache.filter(reaction => reaction.me);
+          const newReactionEmojis = config.reactions.map(r => r.emoji);
+
+          // Remove bot reactions that are no longer configured
+          for (const [emojiKey, reaction] of currentBotReactions) {
+            const stillConfigured = newReactionEmojis.find(newEmoji => {
+              if (reaction.emoji.id) {
+                // Custom emoji - match by ID
+                return newEmoji.includes(reaction.emoji.id);
+              } else {
+                // Unicode emoji - match by name
+                return newEmoji === reaction.emoji.name;
+              }
+            });
+
+            if (!stillConfigured) {
+              try {
+                await reaction.users.remove(interaction.client.user.id);
+                console.log(`Removed bot reaction: ${reaction.emoji.name}`);
+              } catch (error) {
+                console.error(`Failed to remove bot reaction ${reaction.emoji.name}:`, error);
+              }
+            }
           }
+
+          // Add new reactions that aren't already present
+          for (const reaction of config.reactions) {
+            const existingReaction = message.reactions.cache.find(r => {
+              if (reaction.emojiId) {
+                return r.emoji.id === reaction.emojiId;
+              } else {
+                return r.emoji.name === reaction.emojiName;
+              }
+            });
+
+            if (!existingReaction || !existingReaction.me) {
+              try {
+                await message.react(reaction.emoji);
+                console.log(`Added bot reaction: ${reaction.emoji}`);
+              } catch (error) {
+                console.error(`Failed to add reaction ${reaction.emoji}:`, error);
+              }
+            }
+          }
+        } else {
+          console.log("Reactions unchanged - skipping Discord reaction updates");
         }
 
         // Update reaction protection
@@ -481,8 +533,12 @@ class ReactionRoleButtons {
         // Clean up temp config
         interaction.client.reactionRoleConfigs.delete(configId);
 
+        const statusMessage = reactionsChanged ?
+          "✅ Reaction role message and reactions updated successfully!" :
+          "✅ Reaction role message updated successfully! (Reactions unchanged)";
+
         await interaction.editReply({
-          content: `✅ Reaction role message updated successfully!\n🔗 [Jump to message](${message.url})\n🛡️ **Protection updated**: Unauthorized reactions will be automatically removed.`
+          content: `${statusMessage}\n🔗 [Jump to message](${message.url})\n🛡️ **Protection updated**: Unauthorized reactions will be automatically removed.\n📌 **Note**: User reactions and roles were preserved during the update.`
         });
       } else {
         await interaction.editReply({
@@ -496,6 +552,32 @@ class ReactionRoleButtons {
         content: "❌ Failed to update reaction role message."
       });
     }
+  }
+
+  // Helper method to check if reactions changed
+  hasReactionsChanged(oldReactions, newReactions) {
+    if (oldReactions.length !== newReactions.length) {
+      return true;
+    }
+
+    // Create normalized sets for comparison
+    const oldSet = new Set(oldReactions.map(r => r.emoji));
+    const newSet = new Set(newReactions.map(r => r.emoji));
+
+    // Check if any emoji was added or removed
+    for (const oldEmoji of oldSet) {
+      if (!newSet.has(oldEmoji)) {
+        return true;
+      }
+    }
+
+    for (const newEmoji of newSet) {
+      if (!oldSet.has(newEmoji)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   updateReactionMonitoring(client, messageId, allowedReactions) {
