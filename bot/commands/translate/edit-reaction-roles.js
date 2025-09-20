@@ -42,20 +42,34 @@ module.exports = {
             // Create select menu with user's reaction role messages
             const selectOptions = userConfigs.slice(0, 25).map(config => {
                 const channel = interaction.guild.channels.cache.get(config.channel_id);
-                const channelName = channel ? `#${channel.name}` : "Unknown Channel";
+                let channelName = channel ? `#${channel.name}` : "Unknown Channel";
 
-                // Calculate available space for preview (100 char limit - channel name - separator)
-                const separator = " - ";
-                const availableLength = 100 - channelName.length - separator.length - 3; // 3 for "..."
-
-                // Truncate message content to fit within Discord's 100 character limit
-                let preview = config.message_content.replace(/\n/g, ' '); // Replace newlines with spaces
-                if (preview.length > availableLength) {
-                    preview = preview.substring(0, Math.max(10, availableLength)) + "...";
+                // Ensure channel name doesn't exceed reasonable length
+                if (channelName.length > 30) {
+                    channelName = channelName.substring(0, 27) + "...";
                 }
 
+                const separator = " - ";
+                const maxLabelLength = 100;
+                const reservedLength = channelName.length + separator.length + 3; // 3 for "..."
+                const availableForPreview = Math.max(10, maxLabelLength - reservedLength);
+
+                // Clean and truncate message content
+                let preview = config.message_content
+                    .replace(/\s+/g, ' ') // Replace all whitespace (including newlines) with single spaces
+                    .trim();
+
+                if (preview.length > availableForPreview) {
+                    preview = preview.substring(0, availableForPreview - 3) + "...";
+                }
+
+                const finalLabel = `${channelName}${separator}${preview}`;
+
+                // Final safety check - should never trigger but just in case
+                const safeLabel = finalLabel.length > 100 ? finalLabel.substring(0, 97) + "..." : finalLabel;
+
                 return {
-                    label: `${channelName}${separator}${preview}`,
+                    label: safeLabel,
                     value: config.id.toString(),
                     description: `Created: ${new Date(config.created_at).toLocaleDateString()}`,
                 };
