@@ -44,14 +44,18 @@ module.exports = {
                 const channel = interaction.guild.channels.cache.get(config.channel_id);
                 const channelName = channel ? `#${channel.name}` : "Unknown Channel";
 
-                // Truncate message content for display
-                let preview = config.message_content;
-                if (preview.length > 80) {
-                    preview = preview.substring(0, 80) + "...";
+                // Calculate available space for preview (100 char limit - channel name - separator)
+                const separator = " - ";
+                const availableLength = 100 - channelName.length - separator.length - 3; // 3 for "..."
+
+                // Truncate message content to fit within Discord's 100 character limit
+                let preview = config.message_content.replace(/\n/g, ' '); // Replace newlines with spaces
+                if (preview.length > availableLength) {
+                    preview = preview.substring(0, Math.max(10, availableLength)) + "...";
                 }
 
                 return {
-                    label: `${channelName} - ${preview}`,
+                    label: `${channelName}${separator}${preview}`,
                     value: config.id.toString(),
                     description: `Created: ${new Date(config.created_at).toLocaleDateString()}`,
                 };
