@@ -1,4 +1,4 @@
-// handlers/reactionRoleHandler.js (Enhanced with comprehensive debug logging)
+// handlers/reactionRoleHandler.js (Enhanced with reaction removal for single mode)
 class ReactionRoleHandler {
   constructor(storageService, client) {
     this.storageService = storageService;
@@ -68,6 +68,9 @@ class ReactionRoleHandler {
           return; // Don't do anything if they already have this role
         }
 
+        // Get all role mappings for this config to find previous reactions
+        const allMappings = this.storageService.reactionRoles.getRoleMappings(config.id);
+
         // Remove all OTHER existing assignments for this user (not including the one they're getting)
         const currentAssignments = this.storageService.reactionRoles.getUserAssignments(config.id, user.id);
         console.log('📋 Current assignments for user:', currentAssignments);
@@ -80,6 +83,12 @@ class ReactionRoleHandler {
               await member.roles.remove(oldRole).catch(error => {
                 console.error('Failed to remove role:', error);
               });
+            }
+
+            // Find and remove the corresponding reaction
+            const correspondingMapping = allMappings.find(m => m.role_id === assignment.role_id);
+            if (correspondingMapping) {
+              await this.removeUserReaction(reaction.message, user, correspondingMapping);
             }
           }
         }
@@ -123,6 +132,30 @@ class ReactionRoleHandler {
 
     } catch (error) {
       console.error("Error handling reaction role add:", error);
+    }
+  }
+
+  // NEW METHOD: Remove user's reaction from message
+  async removeUserReaction(message, user, mapping) {
+    try {
+      // Find the reaction that corresponds to this mapping
+      const targetReaction = message.reactions.cache.find(reaction => {
+        if (mapping.emoji_id) {
+          // Custom emoji - match by ID
+          return reaction.emoji.id === mapping.emoji_id;
+        } else {
+          // Unicode emoji - match by name
+          return reaction.emoji.name === mapping.emoji_name;
+        }
+      });
+
+      if (targetReaction) {
+        await targetReaction.users.remove(user.id);
+        console.log(`🧹 Removed user's previous reaction: ${mapping.emoji_name} from ${user.username}`);
+      }
+    } catch (error) {
+      console.error(`Failed to remove user's reaction ${mapping.emoji_name}:`, error.message);
+      // Don't throw - this is not critical to the role assignment
     }
   }
 
@@ -192,13 +225,13 @@ class ReactionRoleHandler {
         console.log(`🏷️ Processing nickname prefix removal: [${mapping.nickname_prefix}]`);
         try {
           const currentNick = member.nickname || member.user.username;
-          console.log(`📝 Current nickname: "${currentNick}"`);
+          console.log(`🔍 Current nickname: "${currentNick}"`);
 
           const prefixPattern = new RegExp(`^\\[${mapping.nickname_prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\s*`);
 
           if (prefixPattern.test(currentNick)) {
             const newNick = currentNick.replace(prefixPattern, '');
-            console.log(`📝 Setting new nickname: "${newNick}"`);
+            console.log(`🔍 Setting new nickname: "${newNick}"`);
             await member.setNickname(newNick || null);
             console.log(`✅ Nickname prefix [${mapping.nickname_prefix}] removed successfully`);
           } else {
