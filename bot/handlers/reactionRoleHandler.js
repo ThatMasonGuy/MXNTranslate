@@ -16,6 +16,13 @@ class ReactionRoleHandler {
       const config = this.storageService.reactionRoles.getConfigByMessage(reaction.message.id);
       if (!config) return;
 
+      console.log('🔍 CONFIG DEBUG:', {
+        messageId: reaction.message.id,
+        configId: config.id,
+        isSingleRole: config.is_single_role,
+        isSingleRoleType: typeof config.is_single_role
+      });
+
       // Get the role mapping for this emoji
       const mapping = this.storageService.reactionRoles.getMappingByEmoji(
         config.id,
@@ -47,23 +54,37 @@ class ReactionRoleHandler {
       }
 
       // Check if single role mode
+      console.log('🔍 SINGLE ROLE CHECK:', config.is_single_role, 'Truthy?', !!config.is_single_role);
+
       if (config.is_single_role) {
+        console.log('⚡ SINGLE ROLE MODE ACTIVE - Removing existing roles...');
+
         // Remove all existing assignments for this user
         const currentAssignments = this.storageService.reactionRoles.getUserAssignments(config.id, user.id);
-        
+        console.log('📋 Current assignments for user:', currentAssignments);
+
         for (const assignment of currentAssignments) {
           const oldRole = guild.roles.cache.get(assignment.role_id);
           if (oldRole && member.roles.cache.has(oldRole.id)) {
-            await member.roles.remove(oldRole).catch(console.error);
+            console.log(`🗑️ Removing role: ${oldRole.name} from ${user.username}`);
+            await member.roles.remove(oldRole).catch(error => {
+              console.error('Failed to remove role:', error);
+            });
           }
         }
-        
+
         this.storageService.reactionRoles.removeAllUserAssignments(config.id, user.id);
+        console.log('✅ Cleared all previous assignments');
+      } else {
+        console.log('🔄 MULTIPLE ROLE MODE - Adding role without removing others');
       }
 
       // Add the new role
       if (!member.roles.cache.has(role.id)) {
+        console.log(`➕ Adding role: ${role.name} to ${user.username}`);
         await member.roles.add(role);
+      } else {
+        console.log(`ℹ️ User already has role: ${role.name}`);
       }
 
       // Update nickname if prefix is set and bot has permission
@@ -73,7 +94,7 @@ class ReactionRoleHandler {
           // Remove any existing prefixes first
           const cleanNick = currentNick.replace(/^\[.*?\]\s*/, '');
           const newNick = `[${mapping.nickname_prefix}] ${cleanNick}`;
-          
+
           if (newNick.length <= 32) { // Discord nickname limit
             await member.setNickname(newNick);
           }
@@ -85,8 +106,7 @@ class ReactionRoleHandler {
 
       // Record the assignment
       this.storageService.reactionRoles.addUserAssignment(config.id, user.id, role.id);
-
-      console.log(`Added role ${role.name} to ${user.username} via reaction`);
+      console.log(`✅ Recorded assignment: ${user.username} -> ${role.name}`);
 
     } catch (error) {
       console.error("Error handling reaction role add:", error);
@@ -129,7 +149,7 @@ class ReactionRoleHandler {
         try {
           const currentNick = member.nickname || member.user.username;
           const prefixPattern = new RegExp(`^\\[${mapping.nickname_prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\s*`);
-          
+
           if (prefixPattern.test(currentNick)) {
             const newNick = currentNick.replace(prefixPattern, '');
             await member.setNickname(newNick || null);
