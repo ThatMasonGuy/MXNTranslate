@@ -658,7 +658,15 @@ class ReactionRoleButtons {
       const reactionIndex = parseInt(interaction.values[0]);
 
       if (reactionIndex >= 0 && reactionIndex < config.reactions.length) {
-        const removedReaction = config.reactions.splice(reactionIndex, 1)[0];
+        const removedReaction = config.reactions[reactionIndex];
+
+        // If we're editing an existing message, clean up the Discord reactions
+        if (config.isEditing && config.originalMessageId) {
+          await this.cleanupRemovedReaction(interaction, config, removedReaction);
+        }
+
+        // Remove from config
+        config.reactions.splice(reactionIndex, 1);
         await this.updateConfigEmbed(interaction, config);
 
         await interaction.reply({
@@ -671,6 +679,102 @@ class ReactionRoleButtons {
     }
 
     return false;
+  }
+
+  // NEW METHOD: Clean up reactions and roles when removing a reaction from config
+  async cleanupRemovedReaction(interaction, config, removedReaction) {
+    try {
+      const channel = interaction.guild.channels.cache.get(config.channelId);
+      if (!channel) return;
+
+      const message = await channel.messages.fetch(config.originalMessageId).catch(() => null);
+      if (!message) return;
+
+      // Find the reaction on the message that corresponds to the removed reaction
+      const targetReaction = message.reactions.cache.find(reaction => {
+        if (removedReaction.emojiId) {
+          // Custom emoji - match by ID
+          return reaction.emoji.id === removedReaction.emojiId;
+        } else {
+          // Unicode emoji - match by name
+          return reaction.emoji.name === removedReaction.emojiName;
+        }
+      });
+
+      if (!targetReaction) {
+        console.log(`No reaction found on message for ${removedReaction.emoji}`);
+        return;
+      }
+
+      // Get all users who reacted with this emoji (excluding the bot)
+      const users = await targetReaction.users.fetch();
+      const nonBotUsers = users.filter(user => !user.bot);
+
+      console.log(`🧹 Cleaning up ${nonBotUsers.size} user reactions for removed role: ${removedReaction.roleName}`);
+
+      // Remove the role from all users who have it and remove their reactions
+      const role = interaction.guild.roles.cache.get(removedReaction.roleId);
+
+      if (role) {
+        for (const [userId, user] of nonBotUsers) {
+          try {
+            // Remove the user's reaction
+            await targetReaction.users.remove(userId);
+            console.log(`🗑️ Removed reaction ${removedReaction.emoji} from ${user.username}`);
+
+            // Remove the role if they have it
+            const member = await interaction.guild.members.fetch(userId).catch(() => null);
+            if (member && member.roles.cache.has(role.id)) {
+              await member.roles.remove(role);
+              console.log(`🗑️ Removed role ${role.name} from ${user.username}`);
+
+              // Remove nickname prefix if it exists
+              if (removedReaction.nicknamePrefix && interaction.guild.members.me.permissions.has('ManageNicknames')) {
+                try {
+                  const currentNick = member.nickname || member.user.username;
+                  const prefixPattern = new RegExp(`^\\[${removedReaction.nicknamePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\s*`);
+
+                  if (prefixPattern.test(currentNick)) {
+                    const newNick = currentNick.replace(prefixPattern, '');
+                    await member.setNickname(newNick || null);
+                    console.log(`🏷️ Removed nickname prefix [${removedReaction.nicknamePrefix}] from ${user.username}`);
+                  }
+                } catch (nickError) {
+                  console.error('Failed to remove nickname prefix:', nickError.message);
+                }
+              }
+            }
+
+            // Remove from database assignments if we have storage service
+            if (this.storageService && config.originalConfigId) {
+              this.storageService.reactionRoles.removeUserAssignment(
+                config.originalConfigId,
+                userId,
+                removedReaction.roleId
+              );
+            }
+
+          } catch (error) {
+            console.error(`Failed to clean up reaction/role for ${user.username}:`, error.message);
+          }
+        }
+      }
+
+      // Finally, remove the bot's reaction if it exists
+      if (targetReaction.me) {
+        try {
+          await targetReaction.users.remove(interaction.client.user.id);
+          console.log(`🤖 Removed bot reaction: ${removedReaction.emoji}`);
+        } catch (error) {
+          console.error(`Failed to remove bot reaction ${removedReaction.emoji}:`, error.message);
+        }
+      }
+
+      console.log(`✅ Cleanup complete for removed reaction: ${removedReaction.emoji} → ${removedReaction.roleName}`);
+
+    } catch (error) {
+      console.error('Error during reaction cleanup:', error);
+    }
   }
 
   async handleModal(interaction) {
