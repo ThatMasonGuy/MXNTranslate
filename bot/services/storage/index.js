@@ -5,6 +5,8 @@ const UserStorage = require('./userStorage');
 const GuildStorage = require('./guildStorage');
 const TranslationStorage = require('./translationStorage');
 const ReactionRoleStorage = require('./reactionRoleStorage');
+const TranslationConfigStorage = require('./translationConfigStorage');
+const AutoTranslateStorage = require('./autoTranslateStorage');
 
 class StorageService {
   constructor(db, config) {
@@ -16,6 +18,8 @@ class StorageService {
     this.guilds = new GuildStorage(db);
     this.translations = new TranslationStorage(db);
     this.reactionRoles = new ReactionRoleStorage(db);
+    this.translationConfig = new TranslationConfigStorage(db);
+    this.autoTranslate = new AutoTranslateStorage(db);
   }
 
   async storeMessage(msg) {

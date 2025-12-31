@@ -14,6 +14,7 @@ const ReactionHandler = require('./handlers/reactionHandler');
 const ReactionRoleHandler = require('./handlers/reactionRoleHandler');
 const ReactionProtectionHandler = require('./handlers/reactionProtectionHandler');
 const InteractionHandler = require('./handlers/interactionHandler');
+const AutoTranslateHandler = require('./handlers/autoTranslateHandler');
 
 // Commands and utilities
 const commands = require("./commands");
@@ -42,6 +43,7 @@ const reactionHandler = new ReactionHandler(storageService, translationService, 
 const reactionRoleHandler = new ReactionRoleHandler(storageService, client);
 const reactionProtectionHandler = new ReactionProtectionHandler(storageService, client);
 const interactionHandler = new InteractionHandler(storageService);
+const autoTranslateHandler = new AutoTranslateHandler(storageService, translationService, client);
 
 // Initialize reaction role configs map
 client.reactionRoleConfigs = new Map();
@@ -65,6 +67,7 @@ client.once("ready", async () => {
 // Message events
 client.on("messageCreate", async (msg) => {
   await messageHandler.handleCreate(msg);
+  await autoTranslateHandler.handleMessage(msg);
 });
 
 client.on("messageUpdate", async (oldMsg, newMsg) => {
@@ -128,4 +131,4 @@ client.on("interactionCreate", async (interaction) => {
 
 client.login(process.env.DISCORD_TOKEN);
 
-module.exports = { storageService, translationService };
+module.exports = { storageService, translationService, autoTranslateHandler };

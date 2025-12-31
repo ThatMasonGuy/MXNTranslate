@@ -57,6 +57,15 @@ class ReactionHandler {
     // Don't translate bot messages
     if (reaction.message.author?.bot) return;
 
+    const guildId = reaction.message.guild?.id;
+    const channelId = reaction.message.channel?.id;
+
+    // Check if translation is blocked in this channel
+    if (guildId && channelId && this.storageService.translationConfig.isChannelBlocked(guildId, channelId)) {
+      console.log(`Translation blocked in channel ${channelId} by admin config`);
+      return;
+    }
+
     const targetLang = this.translationService.getTargetLanguage(flag);
     const original = reaction.message.content;
 
@@ -75,7 +84,7 @@ class ReactionHandler {
         return;
       }
 
-      // No existing translation - make new API call and post publicly
+      // No existing translation - make new API call
       const translatedText = await this.translationService.translateMessage(
         original, 
         targetLang, 
@@ -102,7 +111,7 @@ class ReactionHandler {
         user.id
       );
 
-      // Create embed for public reply
+      // Create embed for reply
       const embed = this.translationService.createTranslationEmbed(
         translatedText, 
         targetLang, 
@@ -111,8 +120,34 @@ class ReactionHandler {
         false // not from cache
       );
 
-      // Reply to the original message publicly (creates threaded response)
-      await reaction.message.reply({ embeds: [embed] });
+      // Check if there's an announcement channel configured for this source channel
+      const announcementChannelId = guildId && channelId 
+        ? this.storageService.translationConfig.getAnnouncementChannel(guildId, channelId)
+        : null;
+
+      if (announcementChannelId) {
+        // Send to announcement channel with ping
+        try {
+          const announcementChannel = await reaction.message.guild.channels.fetch(announcementChannelId);
+          if (announcementChannel) {
+            await announcementChannel.send({
+              content: `${user} requested a translation from ${reaction.message.channel}:\n${reaction.message.url}`,
+              embeds: [embed]
+            });
+            console.log(`Translation sent to announcement channel ${announcementChannelId}`);
+          } else {
+            console.error(`Announcement channel ${announcementChannelId} not found, falling back to reply`);
+            await reaction.message.reply({ embeds: [embed] });
+          }
+        } catch (err) {
+          console.error('Failed to send to announcement channel:', err);
+          // Fallback to normal reply
+          await reaction.message.reply({ embeds: [embed] });
+        }
+      } else {
+        // Normal behavior: reply to the original message
+        await reaction.message.reply({ embeds: [embed] });
+      }
 
     } catch (err) {
       console.error("Translation failed:", err);
