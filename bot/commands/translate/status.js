@@ -1,4 +1,4 @@
-// commands/translate/status.js (Keep as-is but make sure it exports properly)
+// ~/MXNTranslate/bot/commands/translate/status.js
 const { SlashCommandSubcommandBuilder, EmbedBuilder } = require("discord.js");
 const axios = require("axios");
 const db = require("../../db");

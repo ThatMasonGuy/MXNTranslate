@@ -1,3 +1,4 @@
+// ~/MXNTranslate/bot/commands/translate/ping.js
 const { SlashCommandSubcommandBuilder } = require("discord.js");
 
 module.exports = {

@@ -1,4 +1,4 @@
-// commands/translate/reaction-roles.js
+// ~/MXNTranslate/bot/commands/translate/reaction-roles.js
 const { SlashCommandSubcommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, StringSelectMenuBuilder } = require("discord.js");
 
 module.exports = {

@@ -1,80 +1,8 @@
-// commands/translate/auto.js
-const { SlashCommandSubcommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+// ~/MXNTranslate/bot/commands/translate/auto.js
+const { PermissionFlagsBits, ChannelType, PermissionsBitField } = require('discord.js');
 
 module.exports = {
-  data: new SlashCommandSubcommandBuilder()
-    .setName('auto')
-    .setDescription('Manage auto-translate channels')
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('create')
-        .setDescription('Create an auto-translate channel that mirrors a source channel')
-        .addChannelOption(option =>
-          option
-            .setName('source')
-            .setDescription('Channel to watch and translate from')
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
-        )
-        .addStringOption(option =>
-          option
-            .setName('language')
-            .setDescription('Target language for translations')
-            .setRequired(true)
-            .addChoices(
-              { name: '🇪🇸 Spanish (es)', value: 'es' },
-              { name: '🇫🇷 French (fr)', value: 'fr' },
-              { name: '🇩🇪 German (de)', value: 'de' },
-              { name: '🇮🇹 Italian (it)', value: 'it' },
-              { name: '🇵🇹 Portuguese (pt)', value: 'pt' },
-              { name: '🇯🇵 Japanese (ja)', value: 'ja' },
-              { name: '🇰🇷 Korean (ko)', value: 'ko' },
-              { name: '🇨🇳 Chinese (zh)', value: 'zh' },
-              { name: '🇷🇺 Russian (ru)', value: 'ru' },
-              { name: '🇸🇦 Arabic (ar)', value: 'ar' },
-              { name: '🇮🇳 Hindi (hi)', value: 'hi' },
-              { name: '🇹🇷 Turkish (tr)', value: 'tr' },
-              { name: '🇳🇱 Dutch (nl)', value: 'nl' },
-              { name: '🇸🇪 Swedish (sv)', value: 'sv' },
-              { name: '🇳🇴 Norwegian (no)', value: 'no' },
-              { name: '🇩🇰 Danish (da)', value: 'da' },
-              { name: '🇫🇮 Finnish (fi)', value: 'fi' },
-              { name: '🇵🇱 Polish (pl)', value: 'pl' },
-              { name: '🇨🇿 Czech (cs)', value: 'cs' },
-              { name: '🇭🇺 Hungarian (hu)', value: 'hu' },
-              { name: '🇬🇷 Greek (el)', value: 'el' },
-              { name: '🇮🇱 Hebrew (he)', value: 'he' },
-              { name: '🇹🇭 Thai (th)', value: 'th' },
-              { name: '🇻🇳 Vietnamese (vi)', value: 'vi' },
-              { name: '🇮🇩 Indonesian (id)', value: 'id' }
-            )
-        )
-        .addStringOption(option =>
-          option
-            .setName('name')
-            .setDescription('Name for the auto-translate channel (optional)')
-            .setRequired(false)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('delete')
-        .setDescription('Remove auto-translate setup from a channel')
-        .addChannelOption(option =>
-          option
-            .setName('channel')
-            .setDescription('Auto-translate channel to remove')
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('list')
-        .setDescription('List all auto-translate channels in this server')
-    ),
-
-  async execute(interaction) {
+  async execute(interaction, subcommand) {
     // Check permissions
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
       return interaction.reply({
@@ -83,7 +11,6 @@ module.exports = {
       });
     }
 
-    const subcommand = interaction.options.getSubcommand();
     const { storageService } = require('../../index');
 
     switch (subcommand) {
@@ -93,24 +20,71 @@ module.exports = {
         const sourceChannel = interaction.options.getChannel('source');
         const language = interaction.options.getString('language');
         const channelName = interaction.options.getString('name') || `${sourceChannel.name}-${language}`;
+        const createRole = interaction.options.getBoolean('create-role') || false;
+        const roleName = interaction.options.getString('role-name');
+        const existingRole = interaction.options.getRole('existing-role');
 
         try {
-          // Create the new auto-translate channel
+          let roleToUse = null;
+
+          // Step 1: Handle role creation/selection
+          if (existingRole) {
+            roleToUse = existingRole;
+          } else if (createRole) {
+            const roleNameFinal = roleName || `${language.toUpperCase()} Speaker`;
+            
+            // Create the role
+            roleToUse = await interaction.guild.roles.create({
+              name: roleNameFinal,
+              reason: `Auto-translate channel role for ${language.toUpperCase()}`
+            });
+          }
+
+          // Step 2: Set up permission overwrites for the channel
+          const permissionOverwrites = [
+            {
+              id: interaction.guild.id, // @everyone
+              deny: [PermissionsBitField.Flags.ViewChannel] // Hide from everyone by default
+            },
+            {
+              id: interaction.client.user.id, // Bot
+              allow: [
+                PermissionsBitField.Flags.ViewChannel,
+                PermissionsBitField.Flags.SendMessages,
+                PermissionsBitField.Flags.ManageWebhooks
+              ]
+            }
+          ];
+
+          // If we have a role, allow it to view the channel
+          if (roleToUse) {
+            permissionOverwrites.push({
+              id: roleToUse.id,
+              allow: [
+                PermissionsBitField.Flags.ViewChannel,
+                PermissionsBitField.Flags.SendMessages,
+                PermissionsBitField.Flags.ReadMessageHistory
+              ]
+            });
+          }
+
+          // Step 3: Create the auto-translate channel
           const newChannel = await interaction.guild.channels.create({
             name: channelName,
             type: ChannelType.GuildText,
             parent: sourceChannel.parent,
             topic: `🌐 Auto-translates messages from ${sourceChannel.name} to ${language.toUpperCase()}`,
+            permissionOverwrites: permissionOverwrites,
             reason: `Auto-translate channel for ${language.toUpperCase()}`
           });
 
-          // Create webhook for the channel
+          // Step 4: Create webhook for the channel
           const webhook = await newChannel.createWebhook({
             name: `Auto-Translate (${language.toUpperCase()})`,
             reason: 'Auto-translate channel webhook'
           });
 
-          // Store configuration in database
+          // Step 5: Store configuration in database
           const result = storageService.autoTranslate.createAutoTranslate(
             interaction.guild.id,
             newChannel.id,
@@ -121,18 +95,29 @@ module.exports = {
           );
 
           if (result.success) {
-            await interaction.editReply({
-              content: `✅ Created auto-translate channel ${newChannel}!\n\n` +
-                       `**Source:** ${sourceChannel}\n` +
-                       `**Language:** ${language.toUpperCase()}\n\n` +
-                       `📝 **How it works:**\n` +
-                       `• Messages in ${sourceChannel} will be auto-translated to ${language.toUpperCase()} and posted here\n` +
-                       `• Messages sent here will be translated back to English and posted in ${sourceChannel}\n` +
-                       `• All auto-translate channels watching ${sourceChannel} will see each other's messages`
-            });
+            let response = `✅ Created auto-translate channel ${newChannel}!\n\n` +
+                         `**Source:** ${sourceChannel}\n` +
+                         `**Language:** ${language.toUpperCase()}\n`;
+
+            if (roleToUse) {
+              response += `**Role:** ${roleToUse} (only users with this role can see the channel)\n`;
+              if (createRole) {
+                response += `\n💡 **Tip:** Use \`/translate reaction-roles\` to set up a reaction role message where users can get the ${roleToUse} role!`;
+              }
+            }
+
+            response += `\n\n📝 **How it works:**\n` +
+                       `• Messages in ${sourceChannel} will be auto-translated to ${language.toUpperCase()} and posted in ${newChannel}\n` +
+                       `• Messages sent in ${newChannel} will be translated back to English and posted in ${sourceChannel}\n` +
+                       `• All auto-translate channels watching ${sourceChannel} will see each other's messages`;
+
+            await interaction.editReply({ content: response });
           } else {
-            // Cleanup channel if database save failed
+            // Cleanup on failure
             await newChannel.delete();
+            if (createRole && roleToUse) {
+              await roleToUse.delete();
+            }
             await interaction.editReply({
               content: `❌ Failed to save auto-translate configuration: ${result.error?.message}`
             });
@@ -210,6 +195,31 @@ module.exports = {
           content: response,
           ephemeral: true
         });
+      }
+
+      case 'cleanup': {
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+          const { autoTranslateHandler } = require('../../index');
+          const removedCount = await autoTranslateHandler.cleanupDeadChannels(interaction.guild.id);
+
+          if (removedCount === 0) {
+            await interaction.editReply({
+              content: '✅ All auto-translate channels are valid! No cleanup needed.'
+            });
+          } else {
+            await interaction.editReply({
+              content: `🧹 Cleaned up ${removedCount} dead auto-translate channel config(s)!`
+            });
+          }
+        } catch (error) {
+          console.error('Error during cleanup:', error);
+          await interaction.editReply({
+            content: `❌ Error during cleanup: ${error.message}`
+          });
+        }
+        break;
       }
 
       default:

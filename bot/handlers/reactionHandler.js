@@ -85,6 +85,9 @@ class ReactionHandler {
       }
 
       // No existing translation - make new API call
+      // Show typing indicator for immediate feedback
+      await reaction.message.channel.sendTyping();
+      
       const translatedText = await this.translationService.translateMessage(
         original, 
         targetLang, 

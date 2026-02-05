@@ -1,8 +1,10 @@
-// scripts/deploy-commands.js (NEW FILE - Run this to register commands with Discord)
+// scripts/deploy-commands.js
 const { REST, Routes } = require('discord.js');
 const fs = require('node:fs');
 const path = require('node:path');
-require('dotenv').config();
+
+// Load .env from the bot directory
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const commands = [];
 
@@ -22,42 +24,44 @@ for (const file of commandFiles) {
   }
 }
 
+// Check if token and client ID are loaded
+if (!process.env.DISCORD_TOKEN) {
+  console.error('❌ ERROR: DISCORD_TOKEN not found in .env file!');
+  console.error('Looking for .env at:', path.join(__dirname, '..', '.env'));
+  process.exit(1);
+}
+
+if (!process.env.CLIENT_ID) {
+  console.error('❌ ERROR: CLIENT_ID not found in .env file!');
+  console.error('Add CLIENT_ID to your .env file:');
+  console.error('CLIENT_ID=your_application_id_here');
+  console.error('Get it from: https://discord.com/developers/applications');
+  process.exit(1);
+}
+
 // Construct and prepare an instance of the REST module
 const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 
 // Deploy commands
 (async () => {
   try {
-    console.log(`Started refreshing ${commands.length} application (/) commands.`);
+    console.log(`🔧 Registering ${commands.length} slash command(s) globally...`);
 
-    // Get client ID from token
-    const clientId = Buffer.from(process.env.DISCORD_TOKEN.split('.')[0], 'base64').toString();
+    // Deploy globally to ALL guilds (takes up to 1 hour to propagate)
+    const data = await rest.put(
+      Routes.applicationCommands(process.env.CLIENT_ID),
+      { body: commands },
+    );
 
-    // For development - deploy to specific guild (faster)
-    // Replace YOUR_GUILD_ID with your test server ID
-    const guildId = '1276352770164658317'; // Replace with your test server ID
-    
-    if (process.argv.includes('--global')) {
-      // Deploy globally (takes up to 1 hour to update)
-      const data = await rest.put(
-        Routes.applicationCommands(clientId),
-        { body: commands },
-      );
-      console.log(`Successfully reloaded ${data.length} application (/) commands globally.`);
-    } else if (guildId && guildId !== '1276352770164658317') {
-      // Deploy to specific guild (instant)
-      const data = await rest.put(
-        Routes.applicationGuildCommands(clientId, guildId),
-        { body: commands },
-      );
-      console.log(`Successfully reloaded ${data.length} application (/) commands for guild ${guildId}.`);
-    } else {
-      console.log('Please set a GUILD_ID in the script or use --global flag');
-      console.log('Guild deployment: node scripts/deploy-commands.js');
-      console.log('Global deployment: node scripts/deploy-commands.js --global');
-    }
+    console.log(`✅ Successfully registered ${data.length} slash command(s) globally!`);
+    console.log('Note: Global commands can take up to 1 hour to appear in all servers.');
 
   } catch (error) {
-    console.error(error);
+    console.error('❌ Failed to register commands:', error);
+    
+    if (error.code === 50001) {
+      console.error('\n💡 Error 50001: Missing Access');
+      console.error('Make sure your bot has the applications.commands scope!');
+    }
   }
 })();

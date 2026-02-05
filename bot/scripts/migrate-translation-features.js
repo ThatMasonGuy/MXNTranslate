@@ -27,33 +27,50 @@ const schemaPath = path.join(__dirname, '..', '..', 'translation_config_schema.s
 const schema = fs.readFileSync(schemaPath, 'utf8');
 
 // Split into individual statements
-const statements = schema
+const allStatements = schema
   .split(';')
   .map(s => s.trim())
   .filter(s => s.length > 0 && !s.startsWith('--'));
 
+// Separate CREATE TABLE and CREATE INDEX statements
+const tableStatements = allStatements.filter(s => s.match(/CREATE TABLE/i));
+const indexStatements = allStatements.filter(s => s.match(/CREATE INDEX/i));
+
 let successCount = 0;
 let errorCount = 0;
 
-for (const statement of statements) {
+// Execute CREATE TABLE statements first
+console.log('📝 Creating tables...\n');
+for (const statement of tableStatements) {
   try {
     db.exec(statement);
     
-    // Extract table name from CREATE TABLE statement
     const match = statement.match(/CREATE TABLE IF NOT EXISTS (\w+)/i);
     if (match) {
       console.log(`✅ Created/verified table: ${match[1]}`);
       successCount++;
-    } else if (statement.includes('CREATE INDEX')) {
-      const indexMatch = statement.match(/CREATE INDEX IF NOT EXISTS (\w+)/i);
-      if (indexMatch) {
-        console.log(`✅ Created/verified index: ${indexMatch[1]}`);
-        successCount++;
-      }
     }
   } catch (error) {
     console.error(`❌ Error executing statement: ${error.message}`);
-    console.error(`Statement: ${statement.substring(0, 100)}...`);
+    console.error(`Statement: ${statement.substring(0, 200)}...`);
+    errorCount++;
+  }
+}
+
+// Then execute CREATE INDEX statements
+console.log('\n📊 Creating indexes...\n');
+for (const statement of indexStatements) {
+  try {
+    db.exec(statement);
+    
+    const indexMatch = statement.match(/CREATE INDEX IF NOT EXISTS (\w+)/i);
+    if (indexMatch) {
+      console.log(`✅ Created/verified index: ${indexMatch[1]}`);
+      successCount++;
+    }
+  } catch (error) {
+    console.error(`❌ Error executing statement: ${error.message}`);
+    console.error(`Statement: ${statement.substring(0, 200)}...`);
     errorCount++;
   }
 }

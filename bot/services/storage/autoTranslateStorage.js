@@ -1,4 +1,4 @@
-// services/storage/autoTranslateStorage.js
+// services/storage/autoTranslateStorage.js (WITH DEBUG LOGGING)
 class AutoTranslateStorage {
   constructor(db) {
     this.db = db;
@@ -13,35 +13,61 @@ class AutoTranslateStorage {
         VALUES (?, ?, ?, ?, ?, ?, 1)
       `).run(guildId, channelId, sourceChannelId, targetLanguage, webhookId, webhookToken);
       
+      // Immediately verify the insert worked
+      const verification = this.db.prepare(`
+        SELECT * FROM auto_translate_channels WHERE id = ?
+      `).get(result.lastInsertRowid);
+      
+      // Also check by channel_id
+      const byChannel = this.db.prepare(`
+        SELECT * FROM auto_translate_channels WHERE channel_id = ?
+      `).get(channelId);
+      
+      // Check by guild_id
+      const byGuild = this.db.prepare(`
+        SELECT * FROM auto_translate_channels WHERE guild_id = ?
+      `).all(guildId);
+      
       return { success: true, id: result.lastInsertRowid };
     } catch (error) {
-      console.error('Failed to create auto-translate config:', error);
+      console.error('❌ Failed to create auto-translate config:', error);
       return { success: false, error };
     }
   }
 
   // Get auto-translate config by channel ID
   getByChannelId(channelId) {
-    return this.db.prepare(`
+    const result = this.db.prepare(`
       SELECT * FROM auto_translate_channels
       WHERE channel_id = ? AND is_active = 1
     `).get(channelId);
+    return result;
   }
 
   // Get all auto-translate configs watching a source channel
   getBySourceChannel(sourceChannelId) {
-    return this.db.prepare(`
+    const results = this.db.prepare(`
       SELECT * FROM auto_translate_channels
       WHERE source_channel_id = ? AND is_active = 1
     `).all(sourceChannelId);
+    return results;
   }
 
   // Get all auto-translate channels for a guild
   getByGuildId(guildId) {
-    return this.db.prepare(`
+    
+    // First, check ALL rows regardless of is_active
+    const allRows = this.db.prepare(`
+      SELECT * FROM auto_translate_channels WHERE guild_id = ?
+    `).all(guildId);
+    
+    // Then check active only
+    const activeRows = this.db.prepare(`
       SELECT * FROM auto_translate_channels
       WHERE guild_id = ? AND is_active = 1
     `).all(guildId);
+    
+    return activeRows;
   }
 
   // Update webhook credentials

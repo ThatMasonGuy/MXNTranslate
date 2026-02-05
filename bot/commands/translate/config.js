@@ -1,72 +1,8 @@
-// commands/translate/config.js
-const { SlashCommandSubcommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+// ~/MXNTranslate/bot/commands/translate/config.js
+const { PermissionFlagsBits } = require('discord.js');
 
 module.exports = {
-  data: new SlashCommandSubcommandBuilder()
-    .setName('config')
-    .setDescription('Configure translation settings')
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('block-channel')
-        .setDescription('Block translation in a specific channel')
-        .addChannelOption(option =>
-          option
-            .setName('channel')
-            .setDescription('Channel to block')
-            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('unblock-channel')
-        .setDescription('Unblock translation in a specific channel')
-        .addChannelOption(option =>
-          option
-            .setName('channel')
-            .setDescription('Channel to unblock')
-            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('set-announcement')
-        .setDescription('Route translations from a source channel to an announcement channel')
-        .addChannelOption(option =>
-          option
-            .setName('source')
-            .setDescription('Source channel where reactions happen')
-            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-            .setRequired(true)
-        )
-        .addChannelOption(option =>
-          option
-            .setName('announcement')
-            .setDescription('Channel where translations will be posted')
-            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('remove-announcement')
-        .setDescription('Remove announcement routing for a channel')
-        .addChannelOption(option =>
-          option
-            .setName('source')
-            .setDescription('Source channel')
-            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('view')
-        .setDescription('View current translation configuration')
-    ),
-
-  async execute(interaction) {
+  async execute(interaction, subcommand) {
     // Check permissions
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
       return interaction.reply({
@@ -75,7 +11,6 @@ module.exports = {
       });
     }
 
-    const subcommand = interaction.options.getSubcommand();
     const { storageService } = require('../../index');
 
     switch (subcommand) {

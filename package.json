@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "deploy": "node scripts/deploy-commands.js",
-    "deploy:global": "node scripts/deploy-commands.js --global",
-    "start": "node bot/index.js"
+    "deploy": "node bot/scripts/deploy-commands.js",
+    "deploy:global": "node bot/scripts/deploy-commands.js --global",
+    "start": "node bot/index.js",
+    "backfill": "node bot/scripts/run-comprehensive-backfill.js",
+    "backfill:analyze": "node bot/scripts/analyze-backfill-coverage.js",
+    "setup:events": "node bot/scripts/setup-event-tracking.js",
+    "query:events": "node bot/scripts/query-events.js"
   },
   "keywords": [],
   "author": "",

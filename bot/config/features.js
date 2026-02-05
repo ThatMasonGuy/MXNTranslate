@@ -6,6 +6,8 @@ module.exports = {
         logReactions: true,
         logEdits: true,
         logDeletes: true,
+        logUserEvents: true,  // Member joins/leaves, updates, voice, moderation
+        logServerEvents: true, // Roles, channels, emojis, guild updates, invites, webhooks
         backfillOnStartup: true
     },
     translation: {

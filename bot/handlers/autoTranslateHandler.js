@@ -4,12 +4,13 @@ class AutoTranslateHandler {
     this.storageService = storageService;
     this.translationService = translationService;
     this.client = client;
+    this.webhookCache = new Map();
   }
 
   async handleMessage(message) {
     if (message.author.bot) return;
     if (!message.guild) return;
-    
+
     const channelId = message.channel.id;
 
     // Check 1: Is this message in an auto-translate channel?
@@ -39,6 +40,9 @@ class AutoTranslateHandler {
 
       console.log(`📨 Auto-translating message from ${config.target_language} channel back to English`);
 
+      // Show typing indicator
+      await message.channel.sendTyping();
+
       // Translate to English
       const translatedText = await this.translationService.translateMessage(
         message.content,
@@ -59,40 +63,63 @@ class AutoTranslateHandler {
       }
 
       // Get the source channel
-      const sourceChannel = await this.client.channels.fetch(config.source_channel_id);
+      const sourceChannel = await this.client.channels.fetch(config.source_channel_id).catch(() => null);
+      
       if (!sourceChannel) {
-        console.error(`Source channel ${config.source_channel_id} not found`);
+        console.log(`⚠️ Source channel ${config.source_channel_id} not found! Deactivating auto-translate config.`);
+        this.storageService.autoTranslate.deactivate(message.channel.id);
         return;
       }
 
-      // Send the translated message to the source channel using webhook
-      const sentMessage = await this.sendViaWebhook(
+      // Send the translated message to the source channel as the original user
+      const sentMessage = await this.sendAsUser(
         sourceChannel,
-        message.author,
         translatedText,
-        config.target_language
+        message.author,
+        message.attachments
       );
 
       if (sentMessage) {
-        // Track this translation
+        // Track this translation to prevent loops
         this.storageService.autoTranslate.trackTranslation(
           message.id,
           sentMessage.id,
-          config.channel_id,
-          config.source_channel_id,
+          message.channel.id,
+          sourceChannel.id,
           config.id,
           true
         );
+      }
 
-        console.log(`✅ Auto-translated message from ${config.target_language} to English in source channel`);
+      // Also send to other auto-translate channels watching the source
+      const otherConfigs = this.storageService.autoTranslate.getBySourceChannel(config.source_channel_id);
+      const activeOtherConfigs = [];
+      
+      for (const otherConfig of otherConfigs) {
+        // Skip the current channel
+        if (otherConfig.channel_id === message.channel.id) continue;
+
+        // Check if channel still exists
+        const channelExists = await this.client.channels.fetch(otherConfig.channel_id).catch(() => null);
+        if (!channelExists) {
+          console.log(`⚠️ Channel ${otherConfig.channel_id} not found! Deactivating.`);
+          this.storageService.autoTranslate.deactivate(otherConfig.channel_id);
+          continue;
+        }
+
+        activeOtherConfigs.push(otherConfig);
+      }
+
+      if (activeOtherConfigs.length > 0) {
+        await this.broadcastToAutoTranslateChannels(message, activeOtherConfigs, true);
       }
 
     } catch (error) {
-      console.error('Error auto-translating message to English:', error);
+      console.error('Error handling message in auto-translate channel:', error);
     }
   }
 
-  // Handle a message in a watched channel (translate to all watching auto-translate channels)
+  // Handle a message in a watched channel (translate to auto-translate channels)
   async handleMessageInWatchedChannel(message, watchingConfigs) {
     try {
       // Check if this message is already an auto-translation
@@ -102,147 +129,173 @@ class AutoTranslateHandler {
 
       console.log(`📡 Broadcasting message to ${watchingConfigs.length} auto-translate channel(s)`);
 
+      // Filter out dead channels before broadcasting
+      const activeConfigs = [];
       for (const config of watchingConfigs) {
-        // Skip if we've already translated this message to this channel
-        if (this.storageService.autoTranslate.isMessageTranslated(message.id, config.channel_id)) {
-          console.log(`Already translated message ${message.id} to channel ${config.channel_id}, skipping`);
+        const channelExists = await this.client.channels.fetch(config.channel_id).catch(() => null);
+        if (!channelExists) {
+          console.log(`⚠️ Channel ${config.channel_id} not found! Deactivating.`);
+          this.storageService.autoTranslate.deactivate(config.channel_id);
           continue;
         }
-
-        try {
-          // Translate the message to the target language
-          const translatedText = await this.translationService.translateMessage(
-            message.content,
-            config.target_language,
-            {
-              discordUserId: message.author.id,
-              userName: message.author.username,
-              guildId: message.guild.id,
-              channelId: message.channel.id,
-              guildName: message.guild.name,
-              channelName: message.channel.name,
-            }
-          );
-
-          if (!translatedText) {
-            console.log(`Translation to ${config.target_language} returned empty, skipping`);
-            continue;
-          }
-
-          // Get the auto-translate channel
-          const autoTranslateChannel = await this.client.channels.fetch(config.channel_id);
-          if (!autoTranslateChannel) {
-            console.error(`Auto-translate channel ${config.channel_id} not found`);
-            continue;
-          }
-
-          // Send the translated message using webhook
-          const sentMessage = await this.sendViaWebhook(
-            autoTranslateChannel,
-            message.author,
-            translatedText,
-            config.target_language,
-            config.webhook_id,
-            config.webhook_token
-          );
-
-          if (sentMessage) {
-            // Track this translation
-            this.storageService.autoTranslate.trackTranslation(
-              message.id,
-              sentMessage.id,
-              message.channel.id,
-              config.channel_id,
-              config.id,
-              true
-            );
-
-            console.log(`✅ Auto-translated message to ${config.target_language} in channel ${config.channel_id}`);
-          }
-
-        } catch (error) {
-          console.error(`Error translating to ${config.target_language}:`, error);
-        }
+        activeConfigs.push(config);
       }
 
+      if (activeConfigs.length === 0) {
+        console.log('No active auto-translate channels found after cleanup');
+        return;
+      }
+
+      await this.broadcastToAutoTranslateChannels(message, activeConfigs, false);
+
     } catch (error) {
-      console.error('Error auto-translating message to watching channels:', error);
+      console.error('Error handling message in watched channel:', error);
     }
   }
 
-  // Send a message via webhook to appear as the original user
-  async sendViaWebhook(channel, author, content, languageCode, webhookId = null, webhookToken = null) {
+  // Broadcast a message to multiple auto-translate channels
+  async broadcastToAutoTranslateChannels(message, configs, isFromAutoChannel) {
+    for (const config of configs) {
+      // Skip if we've already translated this message to this channel
+      if (this.storageService.autoTranslate.isMessageTranslated(message.id, config.channel_id)) {
+        console.log(`Already translated message ${message.id} to channel ${config.channel_id}, skipping`);
+        continue;
+      }
+
+      try {
+        // Get the target channel first (we need it for typing indicator)
+        const targetChannel = await this.client.channels.fetch(config.channel_id).catch(() => null);
+        
+        if (!targetChannel) {
+          console.log(`⚠️ Target channel ${config.channel_id} not found! Deactivating.`);
+          this.storageService.autoTranslate.deactivate(config.channel_id);
+          continue;
+        }
+
+        // Show typing indicator in target channel
+        await targetChannel.sendTyping();
+
+        // Translate the message to the target language
+        const translatedText = await this.translationService.translateMessage(
+          message.content,
+          config.target_language,
+          {
+            discordUserId: message.author.id,
+            userName: message.author.username,
+            guildId: message.guild.id,
+            channelId: message.channel.id,
+            guildName: message.guild.name,
+            channelName: message.channel.name,
+          }
+        );
+
+        if (!translatedText) {
+          console.log(`Translation to ${config.target_language} returned empty, skipping`);
+          continue;
+        }
+
+        // Send the message as the original user
+        const sentMessage = await this.sendAsUser(
+          targetChannel,
+          translatedText,
+          message.author,
+          message.attachments,
+          config.webhook_id,
+          config.webhook_token
+        );
+
+        if (sentMessage) {
+          // Track this translation
+          this.storageService.autoTranslate.trackTranslation(
+            message.id,
+            sentMessage.id,
+            message.channel.id,
+            targetChannel.id,
+            config.id,
+            true
+          );
+        }
+
+      } catch (error) {
+        console.error(`Error broadcasting to channel ${config.channel_id}:`, error);
+      }
+    }
+  }
+
+  // Send a message as another user using webhooks
+  async sendAsUser(channel, content, user, attachments = null, webhookId = null, webhookToken = null) {
     try {
       let webhook;
 
-      if (webhookId && webhookToken) {
-        // Use existing webhook
-        try {
-          webhook = await this.client.fetchWebhook(webhookId, webhookToken);
-        } catch (error) {
-          console.log('Existing webhook not found, creating new one');
-          webhook = null;
+      // Try to get webhook from cache or provided credentials
+      const cacheKey = webhookId || channel.id;
+      
+      if (this.webhookCache.has(cacheKey)) {
+        webhook = this.webhookCache.get(cacheKey);
+      } else if (webhookId && webhookToken) {
+        // Use provided webhook credentials
+        webhook = await this.client.fetchWebhook(webhookId, webhookToken).catch(() => null);
+        
+        if (!webhook) {
+          console.log(`⚠️ Webhook ${webhookId} not found! Might have been deleted.`);
+          return null;
         }
-      }
-
-      // Create webhook if needed
-      if (!webhook) {
+        
+        this.webhookCache.set(cacheKey, webhook);
+      } else {
+        // Create a new webhook for this channel
         webhook = await channel.createWebhook({
-          name: `Auto-Translate (${languageCode.toUpperCase()})`,
-          reason: 'Auto-translate channel webhook'
+          name: 'Auto-Translate',
+          reason: 'Auto-translate temporary webhook'
         });
-
-        console.log(`Created new webhook for channel ${channel.id}`);
-
-        // Store webhook credentials if this is for an auto-translate channel
-        const autoTranslateConfig = this.storageService.autoTranslate.getByChannelId(channel.id);
-        if (autoTranslateConfig) {
-          this.storageService.autoTranslate.updateWebhook(
-            channel.id,
-            webhook.id,
-            webhook.token
-          );
-        }
+        
+        this.webhookCache.set(cacheKey, webhook);
       }
 
-      // Send message as the original user
+      // Send the message via webhook
       const sentMessage = await webhook.send({
         content: content,
-        username: author.username,
-        avatarURL: author.displayAvatarURL({ extension: 'png' })
+        username: user.username,
+        avatarURL: user.displayAvatarURL(),
+        allowedMentions: { parse: ['users', 'roles'] } // Keep mentions (as discussed)
       });
 
       return sentMessage;
 
     } catch (error) {
-      console.error('Error sending via webhook:', error);
-      
-      // Fallback: send as bot with author mention
-      try {
-        return await channel.send({
-          content: `**${author.username}:** ${content}`
-        });
-      } catch (fallbackError) {
-        console.error('Fallback send also failed:', fallbackError);
-        return null;
-      }
+      console.error('Error sending message via webhook:', error);
+      return null;
     }
   }
 
-  // Clean up webhook when auto-translate channel is deleted
+  // Clean up webhook for a channel
   async cleanupWebhook(channelId) {
     try {
-      const config = this.storageService.autoTranslate.getByChannelId(channelId);
-      if (!config || !config.webhook_id) return;
-
-      const webhook = await this.client.fetchWebhook(config.webhook_id, config.webhook_token).catch(() => null);
-      if (webhook) {
-        await webhook.delete('Auto-translate channel removed');
-        console.log(`Cleaned up webhook for channel ${channelId}`);
+      if (this.webhookCache.has(channelId)) {
+        const webhook = this.webhookCache.get(channelId);
+        await webhook.delete().catch(() => {});
+        this.webhookCache.delete(channelId);
       }
     } catch (error) {
       console.error('Error cleaning up webhook:', error);
     }
+  }
+
+  // Cleanup all dead auto-translate channels for a guild
+  async cleanupDeadChannels(guildId) {
+    const configs = this.storageService.autoTranslate.getByGuildId(guildId);
+    let removedCount = 0;
+
+    for (const config of configs) {
+      const channelExists = await this.client.channels.fetch(config.channel_id).catch(() => null);
+      if (!channelExists) {
+        console.log(`🧹 Removing dead channel config: ${config.channel_id}`);
+        this.storageService.autoTranslate.deactivate(config.channel_id);
+        removedCount++;
+      }
+    }
+
+    return removedCount;
   }
 }
 

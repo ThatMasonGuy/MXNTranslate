@@ -1,4 +1,4 @@
-// commands/index.js (Updated command loader)
+// ~/MXNTranslate/bot/commands/index.js
 const fs = require("fs");
 const path = require("path");
 

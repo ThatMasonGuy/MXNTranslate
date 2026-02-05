@@ -1,4 +1,4 @@
-// services/storage/index.js (Updated to include reaction roles)
+// services/storage/index.js (Updated to include reaction roles and event tracking)
 const MessageStorage = require('./messageStorage');
 const ReactionStorage = require('./reactionStorage');
 const UserStorage = require('./userStorage');
@@ -7,6 +7,8 @@ const TranslationStorage = require('./translationStorage');
 const ReactionRoleStorage = require('./reactionRoleStorage');
 const TranslationConfigStorage = require('./translationConfigStorage');
 const AutoTranslateStorage = require('./autoTranslateStorage');
+const UserEventStorage = require('./userEventStorage');
+const ServerEventStorage = require('./serverEventStorage');
 
 class StorageService {
   constructor(db, config) {
@@ -20,6 +22,8 @@ class StorageService {
     this.reactionRoles = new ReactionRoleStorage(db);
     this.translationConfig = new TranslationConfigStorage(db);
     this.autoTranslate = new AutoTranslateStorage(db);
+    this.userEvents = new UserEventStorage(db);
+    this.serverEvents = new ServerEventStorage(db);
   }
 
   async storeMessage(msg) {
