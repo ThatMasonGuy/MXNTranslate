@@ -1,4 +1,4 @@
-// services/storage/reactionStorage.js - UPDATED with correct message schema
+// services/storage/reactionStorage.js - FIXED column count for message insert
 class ReactionStorage {
   constructor(db) {
     this.db = db;
@@ -12,11 +12,11 @@ class ReactionStorage {
 
     if (!messageExists) {
       // Insert basic message record to satisfy foreign key constraint
-      // UPDATED: Include all new columns (webhook_id, application_id, flags)
+      // 14 columns = 14 values (type and deleted are hardcoded 0s in the SQL)
       try {
         this.db.prepare(`
           INSERT OR IGNORE INTO messages (id, channel_id, guild_id, author_id, content, timestamp, edited_timestamp, is_pinned, type, deleted, referenced_message_id, webhook_id, application_id, flags)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
         `).run(
           reaction.message.id,
           reaction.message.channel.id,
@@ -24,13 +24,14 @@ class ReactionStorage {
           reaction.message.author?.id || null,
           reaction.message.content || '',
           reaction.message.createdAt?.toISOString() || new Date().toISOString(),
-          null, // edited_timestamp
+          null,
           reaction.message.pinned ? 1 : 0,
           reaction.message.type || 0,
-          null, // referenced_message_id (not available in reaction event)
-          null, // webhook_id (not available in reaction event)
-          null, // application_id (not available in reaction event)
-          0     // flags (not available in reaction event)
+          // deleted = 0 is hardcoded in SQL
+          null,
+          null,
+          null,
+          0
         );
       } catch (error) {
         console.error('Failed to insert message for reaction storage:', error);
