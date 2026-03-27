@@ -1,9 +1,11 @@
-// handlers/interactionHandler.js (Updated to handle editing)
+// handlers/interactionHandler.js (Updated to handle editing + context menu translate)
 const ReactionRoleButtons = require('./reactionRoleButtons');
+const { EmbedBuilder } = require('discord.js');
 
 class InteractionHandler {
-  constructor(storageService) {
+  constructor(storageService, translationService) {
     this.storageService = storageService;
+    this.translationService = translationService;
     this.reactionRoleButtons = new ReactionRoleButtons(storageService);
   }
 
@@ -14,6 +16,11 @@ class InteractionHandler {
       }
 
       if (interaction.isStringSelectMenu()) {
+        // Handle context menu translation language selection
+        if (interaction.customId.startsWith('ctx_translate:')) {
+          return await this.handleContextTranslate(interaction);
+        }
+
         // Handle edit reaction role selection
         if (interaction.customId === 'edit_rr_select') {
           return await this.handleEditRRSelection(interaction);
@@ -41,6 +48,78 @@ class InteractionHandler {
     }
 
     return false;
+  }
+
+  async handleContextTranslate(interaction) {
+    const messageId = interaction.customId.split(':')[1];
+    const targetLang = interaction.values[0];
+
+    await interaction.deferUpdate();
+
+    try {
+      // Fetch the original message from the channel
+      const message = await interaction.channel.messages.fetch(messageId);
+
+      if (!message || !message.content || message.content.trim().length === 0) {
+        await interaction.editReply({
+          content: 'Could not find that message or it has no text content.',
+          components: [],
+        });
+        return true;
+      }
+
+      const translatedText = await this.translationService.translateMessage(
+        message.content,
+        targetLang,
+        {
+          discordUserId: interaction.user.id,
+          userName: interaction.user.username,
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          guildName: interaction.guild?.name,
+          channelName: interaction.channel?.name,
+        }
+      );
+
+      if (!translatedText) {
+        await interaction.editReply({
+          content: 'Translation returned no result. The message may already be in the target language.',
+          components: [],
+        });
+        return true;
+      }
+
+      const langNames = {
+        en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
+        pt: 'Portuguese', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', ru: 'Russian',
+        ar: 'Arabic', hi: 'Hindi', tr: 'Turkish', nl: 'Dutch', sv: 'Swedish',
+        no: 'Norwegian', da: 'Danish', fi: 'Finnish', pl: 'Polish', cs: 'Czech',
+        hu: 'Hungarian', el: 'Greek', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian',
+      };
+
+      const embed = new EmbedBuilder()
+        .setColor('#50fa7b')
+        .setAuthor({ name: `Translated to ${langNames[targetLang] || targetLang.toUpperCase()}` })
+        .setDescription(translatedText)
+        .setFooter({
+          text: `Requested by ${interaction.user.username}`,
+          iconURL: interaction.user.displayAvatarURL({ extension: 'png' }),
+        });
+
+      await interaction.editReply({
+        content: null,
+        embeds: [embed],
+        components: [],
+      });
+    } catch (err) {
+      console.error('Context menu translation failed:', err);
+      await interaction.editReply({
+        content: `Translation failed: ${err.message}`,
+        components: [],
+      });
+    }
+
+    return true;
   }
 
   async handleEditRRSelection(interaction) {
