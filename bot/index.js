@@ -52,7 +52,7 @@ const messageHandler = new MessageHandler(storageService, config);
 const reactionHandler = new ReactionHandler(storageService, translationService, config);
 const reactionRoleHandler = new ReactionRoleHandler(storageService, client);
 const reactionProtectionHandler = new ReactionProtectionHandler(storageService, client);
-const interactionHandler = new InteractionHandler(storageService);
+const interactionHandler = new InteractionHandler(storageService, translationService);
 const autoTranslateHandler = new AutoTranslateHandler(storageService, translationService, client);
 const userEventHandler = new UserEventHandler(storageService, config);
 const serverEventHandler = new ServerEventHandler(storageService, config);
@@ -241,6 +241,17 @@ client.on("interactionCreate", async (interaction) => {
     // Handle button/modal/select menu interactions first
     const handledByInteractionHandler = await interactionHandler.handleInteraction(interaction);
     if (handledByInteractionHandler) return;
+
+    // Handle context menu commands (message commands like "Translate")
+    if (interaction.isMessageContextMenuCommand()) {
+      const command = commands.get(interaction.commandName);
+      if (!command) {
+        console.error(`Context menu command not found: ${interaction.commandName}`);
+        return;
+      }
+      await command.execute(interaction);
+      return;
+    }
 
     // Handle slash commands
     if (interaction.isChatInputCommand()) {
