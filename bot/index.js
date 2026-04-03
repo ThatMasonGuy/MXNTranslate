@@ -249,7 +249,7 @@ client.on("interactionCreate", async (interaction) => {
         console.error(`Context menu command not found: ${interaction.commandName}`);
         return;
       }
-      await command.execute(interaction);
+      await command.execute(interaction, storageService, translationService);
       return;
     }
 

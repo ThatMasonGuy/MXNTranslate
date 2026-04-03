@@ -9,6 +9,7 @@ const TranslationConfigStorage = require('./translationConfigStorage');
 const AutoTranslateStorage = require('./autoTranslateStorage');
 const UserEventStorage = require('./userEventStorage');
 const ServerEventStorage = require('./serverEventStorage');
+const UserPreferenceStorage = require('./userPreferenceStorage');
 
 class StorageService {
   constructor(db, config) {
@@ -24,6 +25,7 @@ class StorageService {
     this.autoTranslate = new AutoTranslateStorage(db);
     this.userEvents = new UserEventStorage(db);
     this.serverEvents = new ServerEventStorage(db);
+    this.userPreferences = new UserPreferenceStorage(db);
   }
 
   async storeMessage(msg) {

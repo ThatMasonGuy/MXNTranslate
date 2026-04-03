@@ -68,17 +68,19 @@ class InteractionHandler {
         return true;
       }
 
+      const metadata = {
+        discordUserId: interaction.user.id,
+        userName: interaction.user.username,
+        ...(interaction.guildId && { guildId: interaction.guildId }),
+        ...(interaction.channelId && { channelId: interaction.channelId }),
+        ...(interaction.guild?.name && { guildName: interaction.guild.name }),
+        ...(interaction.channel?.name && { channelName: interaction.channel.name }),
+      };
+
       const translatedText = await this.translationService.translateMessage(
         message.content,
         targetLang,
-        {
-          discordUserId: interaction.user.id,
-          userName: interaction.user.username,
-          guildId: interaction.guildId,
-          channelId: interaction.channelId,
-          guildName: interaction.guild?.name,
-          channelName: interaction.channel?.name,
-        }
+        metadata
       );
 
       if (!translatedText) {
