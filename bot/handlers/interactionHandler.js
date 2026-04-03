@@ -57,8 +57,19 @@ class InteractionHandler {
     await interaction.deferUpdate();
 
     try {
+      // In DMs/private channels, interaction.channel may not be cached
+      const channel = interaction.channel ?? await interaction.client.channels.fetch(interaction.channelId);
+
+      if (!channel) {
+        await interaction.editReply({
+          content: 'Could not access this channel for translation.',
+          components: [],
+        });
+        return true;
+      }
+
       // Fetch the original message from the channel
-      const message = await interaction.channel.messages.fetch(messageId);
+      const message = await channel.messages.fetch(messageId);
 
       if (!message || !message.content || message.content.trim().length === 0) {
         await interaction.editReply({
@@ -68,17 +79,19 @@ class InteractionHandler {
         return true;
       }
 
+      const metadata = {
+        discordUserId: interaction.user.id,
+        userName: interaction.user.username,
+        ...(interaction.guildId && { guildId: interaction.guildId }),
+        ...(interaction.channelId && { channelId: interaction.channelId }),
+        ...(interaction.guild?.name && { guildName: interaction.guild.name }),
+        ...(interaction.channel?.name && { channelName: interaction.channel.name }),
+      };
+
       const translatedText = await this.translationService.translateMessage(
         message.content,
         targetLang,
-        {
-          discordUserId: interaction.user.id,
-          userName: interaction.user.username,
-          guildId: interaction.guildId,
-          channelId: interaction.channelId,
-          guildName: interaction.guild?.name,
-          channelName: interaction.channel?.name,
-        }
+        metadata
       );
 
       if (!translatedText) {
@@ -97,12 +110,15 @@ class InteractionHandler {
         hu: 'Hungarian', el: 'Greek', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian',
       };
 
+      // Save the user's language choice so they won't be asked again
+      this.storageService.userPreferences.setPreferredLanguage(interaction.user.id, targetLang);
+
       const embed = new EmbedBuilder()
         .setColor('#50fa7b')
         .setAuthor({ name: `Translated to ${langNames[targetLang] || targetLang.toUpperCase()}` })
         .setDescription(translatedText)
         .setFooter({
-          text: `Requested by ${interaction.user.username}`,
+          text: `Requested by ${interaction.user.username} • ${langNames[targetLang] || targetLang} saved as default`,
           iconURL: interaction.user.displayAvatarURL({ extension: 'png' }),
         });
 
