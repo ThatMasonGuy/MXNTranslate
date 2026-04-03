@@ -1,6 +1,6 @@
 // registerSlashCommands.js
 const { REST, Routes } = require("discord.js");
-require("dotenv").config();
+require("dotenv").config({ path: "./bot/.env" });
 const commandMap = require("./bot/commands");
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
