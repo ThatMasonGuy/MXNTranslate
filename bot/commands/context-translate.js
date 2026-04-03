@@ -38,6 +38,10 @@ const LANGUAGE_OPTIONS = [
   { label: "Indonesian", value: "id", emoji: "🇮🇩" },
 ];
 
+const LANG_NAMES = Object.fromEntries(
+  LANGUAGE_OPTIONS.map(opt => [opt.value, opt.label])
+);
+
 module.exports = {
   data: new ContextMenuCommandBuilder()
     .setName("Translate")
@@ -52,7 +56,10 @@ module.exports = {
       InteractionContextType.PrivateChannel,
     ]),
 
-  async execute(interaction) {
+  LANGUAGE_OPTIONS,
+  LANG_NAMES,
+
+  async execute(interaction, storageService, translationService) {
     const targetMessage = interaction.targetMessage;
 
     if (!targetMessage.content || targetMessage.content.trim().length === 0) {
@@ -62,6 +69,56 @@ module.exports = {
       });
     }
 
+    // Check if user has a saved language preference
+    const preferredLang = storageService?.userPreferences?.getPreferredLanguage(interaction.user.id);
+
+    if (preferredLang) {
+      // Translate directly using saved preference
+      await interaction.deferReply({ flags: 64 });
+
+      try {
+        const metadata = {
+          discordUserId: interaction.user.id,
+          userName: interaction.user.username,
+          ...(interaction.guildId && { guildId: interaction.guildId }),
+          ...(interaction.channelId && { channelId: interaction.channelId }),
+          ...(interaction.guild?.name && { guildName: interaction.guild.name }),
+          ...(interaction.channel?.name && { channelName: interaction.channel.name }),
+        };
+
+        const translatedText = await translationService.translateMessage(
+          targetMessage.content,
+          preferredLang,
+          metadata
+        );
+
+        if (!translatedText) {
+          await interaction.editReply({
+            content: 'Translation returned no result. The message may already be in the target language.',
+          });
+          return;
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor('#50fa7b')
+          .setAuthor({ name: `Translated to ${LANG_NAMES[preferredLang] || preferredLang.toUpperCase()}` })
+          .setDescription(translatedText)
+          .setFooter({
+            text: `Requested by ${interaction.user.username} • /translate set-language to change`,
+            iconURL: interaction.user.displayAvatarURL({ extension: 'png' }),
+          });
+
+        await interaction.editReply({ embeds: [embed] });
+      } catch (err) {
+        console.error('Context menu translation failed:', err);
+        await interaction.editReply({
+          content: `Translation failed: ${err.message}`,
+        });
+      }
+      return;
+    }
+
+    // No saved preference — show language picker dropdown
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`ctx_translate:${targetMessage.id}`)
@@ -70,7 +127,7 @@ module.exports = {
     );
 
     await interaction.reply({
-      content: "Select a language to translate this message into:",
+      content: "Select a language to translate this message into:\n-# Tip: Use `/translate set-language` to set a default and skip this step.",
       components: [row],
       flags: 64,
     });

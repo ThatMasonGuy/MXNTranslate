@@ -7,7 +7,13 @@ class Translator {
 
     try {
       const translationStartTime = Date.now();
-      
+
+      // Filter out null/undefined metadata values to avoid API errors
+      const cleanMeta = {};
+      for (const [key, value] of Object.entries(discordMeta)) {
+        if (value != null) cleanMeta[key] = value;
+      }
+
       const response = await axios.post(
         "https://mxn.au/translate/post",
         {
@@ -15,7 +21,7 @@ class Translator {
           fromLang,
           targetLang,
           platform: "discord",
-          ...discordMeta,
+          ...cleanMeta,
         },
         {
           headers: {
@@ -38,7 +44,7 @@ class Translator {
       return data.translated || data.outputText || null;
     } catch (err) {
       console.error("Translation request failed:", err.message);
-      throw new Error(`Translation failed: ${err.message}`);
+      throw new Error(`Request failed with status code ${err.response?.status || 'unknown'}: ${err.response?.data?.error || err.message}`);
     }
   }
 

@@ -26,6 +26,44 @@ module.exports = {
         .setName("edit-reaction-roles")
         .setDescription("Edit existing reaction role messages")
     )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("set-language")
+        .setDescription("Set your preferred translation language")
+        .addStringOption(option =>
+          option
+            .setName("language")
+            .setDescription("Your preferred language (leave empty to clear)")
+            .setRequired(false)
+            .addChoices(
+              { name: '🇺🇸 English', value: 'en' },
+              { name: '🇪🇸 Spanish', value: 'es' },
+              { name: '🇫🇷 French', value: 'fr' },
+              { name: '🇩🇪 German', value: 'de' },
+              { name: '🇮🇹 Italian', value: 'it' },
+              { name: '🇵🇹 Portuguese', value: 'pt' },
+              { name: '🇯🇵 Japanese', value: 'ja' },
+              { name: '🇰🇷 Korean', value: 'ko' },
+              { name: '🇨🇳 Chinese', value: 'zh' },
+              { name: '🇷🇺 Russian', value: 'ru' },
+              { name: '🇸🇦 Arabic', value: 'ar' },
+              { name: '🇮🇳 Hindi', value: 'hi' },
+              { name: '🇹🇷 Turkish', value: 'tr' },
+              { name: '🇳🇱 Dutch', value: 'nl' },
+              { name: '🇸🇪 Swedish', value: 'sv' },
+              { name: '🇳🇴 Norwegian', value: 'no' },
+              { name: '🇩🇰 Danish', value: 'da' },
+              { name: '🇫🇮 Finnish', value: 'fi' },
+              { name: '🇵🇱 Polish', value: 'pl' },
+              { name: '🇨🇿 Czech', value: 'cs' },
+              { name: '🇭🇺 Hungarian', value: 'hu' },
+              { name: '🇬🇷 Greek', value: 'el' },
+              { name: '🇹🇭 Thai', value: 'th' },
+              { name: '🇻🇳 Vietnamese', value: 'vi' },
+              { name: '🇮🇩 Indonesian', value: 'id' }
+            )
+        )
+    )
     // Config subcommand group
     .addSubcommandGroup(group =>
       group
