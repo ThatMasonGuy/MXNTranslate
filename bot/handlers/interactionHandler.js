@@ -110,12 +110,15 @@ class InteractionHandler {
         hu: 'Hungarian', el: 'Greek', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian',
       };
 
+      // Save the user's language choice so they won't be asked again
+      this.storageService.userPreferences.setPreferredLanguage(interaction.user.id, targetLang);
+
       const embed = new EmbedBuilder()
         .setColor('#50fa7b')
         .setAuthor({ name: `Translated to ${langNames[targetLang] || targetLang.toUpperCase()}` })
         .setDescription(translatedText)
         .setFooter({
-          text: `Requested by ${interaction.user.username}`,
+          text: `Requested by ${interaction.user.username} • ${langNames[targetLang] || targetLang} saved as default`,
           iconURL: interaction.user.displayAvatarURL({ extension: 'png' }),
         });
 
