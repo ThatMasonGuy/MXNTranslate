@@ -57,8 +57,19 @@ class InteractionHandler {
     await interaction.deferUpdate();
 
     try {
+      // In DMs/private channels, interaction.channel may not be cached
+      const channel = interaction.channel ?? await interaction.client.channels.fetch(interaction.channelId);
+
+      if (!channel) {
+        await interaction.editReply({
+          content: 'Could not access this channel for translation.',
+          components: [],
+        });
+        return true;
+      }
+
       // Fetch the original message from the channel
-      const message = await interaction.channel.messages.fetch(messageId);
+      const message = await channel.messages.fetch(messageId);
 
       if (!message || !message.content || message.content.trim().length === 0) {
         await interaction.editReply({
