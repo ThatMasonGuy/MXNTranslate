@@ -1,195 +1,105 @@
-# MXNTranslate Bot - Translation Features Update
+# MXNTranslate Discord Bot
 
-## 🎉 What's New
+Discord bot for message/reaction logging, on-demand translation, auto-translate channels, and reaction-role management.
 
-This update adds two major features to your Discord translation bot:
+## Features
 
-### ✨ Feature 1: Admin Translation Controls
-- Block specific channels from translation
-- Route translations to announcement channels
-- Mention users when posting to announcement channels
-- Full configuration management via slash commands
+- **Reaction-based translation** using language-flag reactions (with channel-level controls).  
+- **Message context menu translation** (`Translate`) with per-user preferred language support.  
+- **Auto-translate channel mirroring** between a source channel and target-language channel(s), including webhook posting and cleanup tools.  
+- **Reaction roles** with create/edit flows and protection handling.  
+- **Event tracking/storage** for messages, reactions, user events, and server events in SQLite.
 
-### 🌐 Feature 2: Auto-Translate Channels
-- Create channels that auto-translate messages to/from any language
-- Bidirectional translation (source ↔ auto-translate)
-- Multiple language channels can watch the same source
-- Webhook integration for natural-looking messages
-- Smart circular translation prevention
+## Commands
 
----
+This project currently registers the following top-level application commands:
 
-## 📋 Quick Start
+- `/translate` (slash command)
+  - `ping`
+  - `status`
+  - `reaction-roles`
+  - `edit-reaction-roles`
+  - `set-language`
+  - `config block-channel`
+  - `config unblock-channel`
+  - `config set-announcement`
+  - `config remove-announcement`
+  - `config view`
+  - `auto create`
+  - `auto delete`
+  - `auto list`
+  - `auto cleanup`
+- `Translate` (message context menu command)
 
-### 1. Read the Documentation
-- **IMPLEMENTATION_SUMMARY.md** - Technical overview and file changes
-- **TRANSLATION_FEATURES_GUIDE.md** - Complete user guide with examples
+## Runtime Requirements
 
-### 2. Deploy to Production
+- Node.js (project uses CommonJS modules and npm scripts).
+- Discord bot token and app/client ID.
+- SQLite database file at:
+  - `/home/mason/discord_data/discord_tracker.db`
+- Translation API credentials:
+  - `OPENAI_KEY` is sent in the `x-openai-key` header to `https://mxn.au/translate/post`.
+
+## Environment Setup
+
+Create `bot/.env` with at least:
+
+```env
+DISCORD_TOKEN=your_bot_token
+CLIENT_ID=your_discord_application_id
+OPENAI_KEY=your_translation_api_key
+```
+
+> `deploy-commands.js` loads `.env` from `bot/.env`, while `bot/index.js` also relies on environment variables at runtime.
+
+## Install & Run
 
 ```bash
-# 1. Backup your current bot
-cp -r /path/to/current/bot /path/to/backup/bot-$(date +%Y%m%d)
-
-# 2. Copy updated files
-cp -r bot/* /path/to/production/bot/
-
-# 3. Run database migration
-cd /path/to/production
-node bot/scripts/migrate-translation-features.js
-
-# 4. Deploy slash commands
+npm install
 npm run deploy
-
-# 5. Restart bot
-pm2 restart discord-bot  # or your process manager
+npm start
 ```
 
-### 3. Test the Features
+### Useful Scripts
 
 ```bash
-# Test admin controls
-/translate config block-channel #test
-/translate config set-announcement source:#general announcement:#translations
-
-# Test auto-translate
-/translate auto create source:#general language:es
+npm run deploy            # Register application commands
+npm run deploy:global     # Alias script for command deployment
+npm run start             # Start bot
+npm run backfill          # Run comprehensive storage backfill
+npm run backfill:analyze  # Analyze backfill coverage
+npm run setup:events      # Setup event tracking tables
+npm run query:events      # Query tracked events
 ```
 
----
+## Permissions / Intents Notes
 
-## 📁 What's Included
+The bot initializes with intents for guilds, messages, reactions, members, voice states, emojis/stickers, invites, webhooks, and moderation events. Ensure these are enabled in the Discord Developer Portal where required.
 
-### New Files
-- `bot/services/storage/translationConfigStorage.js` - Config storage
-- `bot/services/storage/autoTranslateStorage.js` - Auto-translate storage
-- `bot/handlers/autoTranslateHandler.js` - Auto-translate logic
-- `bot/commands/translate/config.js` - Config commands
-- `bot/commands/translate/auto.js` - Auto-translate commands
-- `bot/scripts/migrate-translation-features.js` - Database migration
-- `translation_config_schema.sql` - Database schema
+For feature completeness, the bot should also have permissions such as:
 
-### Modified Files
-- `bot/index.js` - Added auto-translate handler
-- `bot/services/storage/index.js` - Added new storage modules
-- `bot/handlers/reactionHandler.js` - Added config checks
+- Read/Send messages in relevant channels
+- Manage Webhooks (for auto-translate channels)
+- Manage Roles (for reaction-role operations)
+- Manage Channels (for auto-translate create/delete flows)
+- Manage Server / Manage Guild (for translation config commands)
 
-### Documentation
-- `IMPLEMENTATION_SUMMARY.md` - Technical details
-- `TRANSLATION_FEATURES_GUIDE.md` - User guide
-- `README.md` - This file
+## Database & Migrations
 
----
+This repository contains SQL/scripts for translation/event tracking migrations (for example in `bot/scripts/` and top-level `.sql` files). Run the relevant migration/setup scripts before first production start if your DB is missing required tables.
 
-## 🔧 Requirements
+## Project Structure (high level)
 
-- Node.js (your current version)
-- Discord.js 14.x (already installed)
-- better-sqlite3 (already installed)
-- Existing database at `/home/mason/discord_data/discord_tracker.db`
-- Bot permissions: Manage Webhooks, Manage Messages
+- `bot/index.js` — main bot bootstrap and event wiring
+- `bot/commands/` — slash + context menu command handlers
+- `bot/handlers/` — Discord event handlers
+- `bot/services/` — storage + translation services
+- `bot/scripts/` — deployment, migration, and maintenance scripts
+- `bot/utils/` — backfill and snapshot helpers
 
----
+## Notes
 
-## 📊 New Database Tables
-
-The migration creates 5 new tables:
-- `translation_config` - Guild settings
-- `blocked_translation_channels` - Blocked channels list
-- `announcement_translation_channels` - Channel routing
-- `auto_translate_channels` - Auto-translate configs
-- `translated_messages` - Message tracking
-
----
-
-## 🎯 New Slash Commands
-
-### Admin Configuration
-```
-/translate config block-channel <channel>
-/translate config unblock-channel <channel>
-/translate config set-announcement <source> <announcement>
-/translate config remove-announcement <source>
-/translate config view
-```
-
-### Auto-Translate Management
-```
-/translate auto create <source> <language> [name]
-/translate auto delete <channel>
-/translate auto list
-```
-
----
-
-## ✅ Pre-Deployment Checklist
-
-- [ ] Read IMPLEMENTATION_SUMMARY.md
-- [ ] Read TRANSLATION_FEATURES_GUIDE.md
-- [ ] Backup current bot
-- [ ] Backup database
-- [ ] Copy files to production
-- [ ] Run migration script
-- [ ] Deploy slash commands
-- [ ] Restart bot
-- [ ] Test admin controls
-- [ ] Test auto-translate
-- [ ] Monitor logs for errors
-
----
-
-## 🐛 Troubleshooting
-
-**Migration fails:**
-- Check database path in `bot/db.js`
-- Ensure database file permissions
-- Verify database isn't locked
-
-**Commands not appearing:**
-- Run `npm run deploy` again
-- Wait up to 1 hour for global commands
-- Check bot has applications.commands scope
-
-**Auto-translate not working:**
-- Verify bot has "Manage Webhooks" permission
-- Check translation API is accessible
-- Review bot logs for errors
-
-**Circular translations:**
-- This is normal and handled automatically
-- Check `translated_messages` table
-- Messages are tracked to prevent loops
-
----
-
-## 📞 Support
-
-1. Check the guides in this package
-2. Review bot logs
-3. Inspect database with SQLite browser
-4. Test in a private server first
-
----
-
-## 🚀 Next Steps
-
-After deploying Features 1 and 2, Feature 3 (Web Dashboard) would require:
-- Express.js web server
-- Discord OAuth integration
-- Vue.js frontend (matches your tech stack)
-- API endpoints for configuration
-- Session management
-
-This would be a separate project that integrates with the bot.
-
----
-
-## 🎉 You're Ready!
-
-Everything is built, tested, and ready to deploy. Follow the Quick Start guide above!
-
-**Questions?** Check the comprehensive guides in this package.
-**Issues?** Review the troubleshooting section.
-**Ready to deploy?** Follow the deployment steps!
-
-Good luck! 🚀
+- Command deployment currently uses global command registration via Discord REST `applicationCommands` route.
+- The repository includes additional docs:
+  - `TRANSLATION_FEATURES_GUIDE.md`
+  - `IMPLEMENTATION_SUMMARY.md`
